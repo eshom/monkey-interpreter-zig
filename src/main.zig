@@ -1,24 +1,29 @@
 const std = @import("std");
+const repl = @import("repl.zig");
+const os_tag = @import("builtin").os.tag;
 
 pub fn main() !void {
-    // Prints to stderr (it's a shortcut based on `std.io.getStdErr()`)
-    std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
+    var _gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const gpa = _gpa.allocator();
 
-    // stdout is for the actual output of your application, for example if you
-    // are implementing gzip, then only the compressed bytes should be sent to
-    // stdout, not any debugging messages.
-    const stdout_file = std.io.getStdOut().writer();
-    var bw = std.io.bufferedWriter(stdout_file);
-    const stdout = bw.writer();
+    var user: []const u8 = undefined;
+    switch (os_tag) {
+        .linux => {
+            user = std.os.getenv("USER") orelse @panic("no `USER` environment variable\n");
+        },
+        .windows => {
+            const env_var = std.unicode.utf8ToUtf16LeStringLiteral("USERNAME");
+            const user16 = std.os.getenvW(env_var) orelse @panic("no `USERNAME` environment variable\n");
+            const user_m = try std.unicode.utf16leToUtf8Alloc(gpa, user16);
+            user = user_m;
+        },
+        else => @panic("OS not supported\n"),
+    }
 
-    try stdout.print("Run `zig build test` to run the tests.\n", .{});
+    const stdout = std.io.getStdOut().writer();
+    const stdin = std.io.getStdIn().reader();
 
-    try bw.flush(); // don't forget to flush!
-}
-
-test "simple test" {
-    var list = std.ArrayList(i32).init(std.testing.allocator);
-    defer list.deinit(); // try commenting this out and see if zig detects the memory leak!
-    try list.append(42);
-    try std.testing.expectEqual(@as(i32, 42), list.pop());
+    try stdout.print("Hello {s}! This is the Monkey programming language!\n", .{user});
+    try stdout.print("Feel free to type in commands\n", .{});
+    try repl.start(gpa, stdin, stdout);
 }
