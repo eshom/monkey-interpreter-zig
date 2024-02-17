@@ -1,4 +1,8 @@
 const std = @import("std");
+const Allocator = std.mem.Allocator;
+const t = std.testing;
+
+pub const TokenType = @typeInfo(Token).Union.tag_type.?;
 
 pub const Token = union(enum) {
     illegal: []const u8,
@@ -46,6 +50,25 @@ pub const Token = union(enum) {
             .true, .false => |v| try out.print("Type: {s:<10} || Literal: {any}\n", .{@tagName(self.*), v}),
         }
     }
+
+    pub fn tokenType(self: *const Token) []const u8 {
+        return @tagName(self.*);
+    }
+
+    pub fn literal(self: *const Token, allocator: Allocator) ![]u8 {
+        var out: []u8 = undefined;
+
+        switch (self.*) {
+            .illegal, .eof, .ident, .assign, .plus, .minus, .bang, .asterix, .slash,
+            .lt, .gt, .eq, .not_eq, .comma, .semicolon, .lparen, .rparen, .lbrace, .rbrace,
+            .function, .let, .@"if", .@"else",
+            .@"return" => |v| out = try std.fmt.allocPrint(allocator, "{s}", .{v}),
+            .int => |v| out = try std.fmt.allocPrint(allocator, "{d}", .{v}),
+            .true, .false => |v| out = try std.fmt.allocPrint(allocator, "{any}", .{v}),
+        }
+
+        return out;
+    }
 };
 
 const keywords = std.comptime_string_map.ComptimeStringMap(Token, .{
@@ -60,4 +83,18 @@ const keywords = std.comptime_string_map.ComptimeStringMap(Token, .{
 
 pub fn lookupIdent(ident: []const u8) Token {
     return keywords.get(ident) orelse Token{.ident = ident};
+}
+
+test "token print and literal" {
+    std.debug.print("\n",. {});
+    const tok = Token{.ident = "testIdent"};
+    const literal = try tok.literal(t.allocator);
+    defer t.allocator.free(literal);
+    try t.expectEqualStrings("testIdent", literal);
+
+    const tag = tok.tokenType();
+    try t.expectEqualStrings("ident", tag);
+
+    const stderr = std.io.getStdErr().writer();
+    try tok.print(stderr);
 }
