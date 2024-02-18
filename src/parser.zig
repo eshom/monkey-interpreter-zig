@@ -73,8 +73,30 @@ const Parser = struct {
     fn parseStatement(self: *Parser, allocator: Allocator) !*ast.Node {
         switch (self.cur_token) {
             .let => return try self.parseLetStatement(allocator),
+            .@"return" => return try self.parseReturnStatement(allocator),
             else => return ParserError.InvalidStatementToken,
         }
+    }
+
+    fn parseReturnStatement(self: *Parser, allocator: Allocator) !*ast.Node {
+        const rtn = try allocator.create(ast.Node);
+        rtn.* = .{
+            .statement = .{
+                .@"return" = .{
+                    .token = self.cur_token,
+                    .return_value = null,
+                }
+            }
+        };
+
+        self.nextToken();
+
+        //TODO: skipping expressions until semicolon for now
+        while (!self.curTokenIs(.semicolon)) {
+            self.nextToken();
+        }
+
+        return rtn;
     }
 
     // program needs to cleanup a bunch of types allocated here
@@ -169,6 +191,48 @@ test "let statements" {
         .{.let = .{ .token = .{.let = "let"}, .name = &expectedIdentifiers[0], .value = null }},
         .{.let = .{ .token = .{.let = "let"}, .name = &expectedIdentifiers[1], .value = null }},
         .{.let = .{ .token = .{.let = "let"}, .name = &expectedIdentifiers[2], .value = null }},
+    };
+
+    try t.expectEqualDeep(&expectedStatements, prog.statements.items);
+
+    if (par.errors.items.len > 0) {
+        std.debug.print("Caught parser errors:\n", .{});
+        for (par.errors.items) |msg| {
+            std.debug.print("{s}\n", .{msg});
+        }
+    }
+}
+
+test "return statements" {
+    std.debug.print("\n",. {});
+
+    const input =
+        \\return x;
+        \\return y + x + 5;
+        \\return;
+        \\return (x + y) - 5;
+    ;
+
+    var prog_arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer prog_arena.deinit();
+    const allocator = prog_arena.allocator();
+
+    const lex = try lexer.Lexer.new(allocator, input);
+    const par = try Parser.new(allocator, lex);
+    const prog = try par.parseProgram(allocator);
+
+    try t.expectEqual(4, prog.statements.items.len);
+
+    // for (prog.statements.items) |st| {
+    //     std.debug.print("statement token literal: {s}\n",.{try st.tokenLiteral(allocator)});
+    //     std.debug.print("ident token literal {s}\n", .{try st.let.name.token.literal(allocator)});
+    // }
+
+    const expectedStatements: [4]ast.Statement = .{
+        .{.@"return" = .{ .token = .{.@"return" = "return"}, .return_value = null }},
+        .{.@"return" = .{ .token = .{.@"return" = "return"}, .return_value = null }},
+        .{.@"return" = .{ .token = .{.@"return" = "return"}, .return_value = null }},
+        .{.@"return" = .{ .token = .{.@"return" = "return"}, .return_value = null }},
     };
 
     try t.expectEqualDeep(&expectedStatements, prog.statements.items);

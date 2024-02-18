@@ -14,10 +14,11 @@ pub const Node = union(enum) {
 
 pub const Statement = union(enum) {
     let: LetStatement,
+    @"return": ReturnStatement,
 
     pub fn tokenLiteral(self: *const Statement, allocator: Allocator) ![]const u8 {
         switch (self.*) {
-            .let => |stm| return stm.token.literal(allocator),
+            .let, .@"return" => |stm| return stm.token.literal(allocator),
         }
     }
 };
@@ -56,8 +57,13 @@ pub const Identifier = struct {
     value: []const u8,
 };
 
-const LetStatement =  struct {
+pub const LetStatement =  struct {
     token: token.Token, // token.Token.let
     name: *Identifier,
     value: ?Expression,
+};
+
+pub const ReturnStatement = struct {
+    token: token.Token, // token.Token.return
+    return_value: ?Expression,
 };
