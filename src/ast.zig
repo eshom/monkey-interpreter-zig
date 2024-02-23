@@ -1,5 +1,8 @@
 const std = @import("std");
+const t = std.testing;
 const token = @import("token.zig");
+//const lexer = @import("lexer.zig");
+//const parser = @import("parser.zig");
 const ArrayListStmt = std.ArrayList(Statement);
 const Allocator = std.mem.Allocator;
 
@@ -15,10 +18,32 @@ pub const Node = union(enum) {
 pub const Statement = union(enum) {
     let: LetStatement,
     @"return": ReturnStatement,
+    expression: ExpressionStatement,
 
     pub fn tokenLiteral(self: *const Statement, allocator: Allocator) ![]const u8 {
         switch (self.*) {
-            .let, .@"return" => |stm| return stm.token.literal(allocator),
+            .let, .@"return", .expression => |stm| return stm.token.literal(allocator),
+        }
+    }
+
+    pub fn string(self: *const Statement, allocator: Allocator) ![]const u8 {
+        switch (self.*) {
+            .let => |stmt| {
+                return try std.fmt.allocPrint(allocator, "{s} {s} = {s};", .{
+                    try stmt.token.literal(allocator),
+                    stmt.name.value,
+                    if (stmt.value) |st| try st.string(allocator) else "null",
+                });
+            },
+            .@"return" => |stmt| {
+                return try std.fmt.allocPrint(allocator, "{s} {s};", .{
+                    try stmt.token.literal(allocator),
+                    if (stmt.return_value) |val| try val.string(allocator) else "null",
+                });
+            },
+            .expression => |stmt| {
+                return if (stmt.expression) |exp| exp.string(allocator) else "null";
+            },
         }
     }
 };
@@ -28,8 +53,17 @@ pub const Expression = union(enum) {
 
     pub fn tokenLiteral(self: *const Expression, allocator: Allocator) ![]const u8 {
         switch (self.*) {
-            .ident => |exp| return exp.token.literal(allocator),
+            .ident => |exp| return try exp.token.literal(allocator),
         }
+    }
+
+    pub fn string(self: *const Expression, allocator: Allocator) ![]const u8 {
+        _ = allocator;
+        switch (self.*) {
+            .ident => |exp| return exp.value,
+        }
+
+        unreachable;
     }
 };
 
@@ -38,7 +72,7 @@ pub const Program = struct {
 
     pub fn tokenLiteral(self: *const Program, allocator: Allocator) ![]const u8 {
         if (self.statements.items.len > 0) {
-            return self.statements.items[0].tokenLiteral(allocator);
+            return try self.statements.items[0].tokenLiteral(allocator);
         } else {
             return "";
         }
@@ -50,6 +84,15 @@ pub const Program = struct {
         return prog;
     }
 
+    pub fn string(self: *Program, allocator: Allocator) ![]const u8 {
+        var out = std.ArrayList([]const u8).init(allocator);
+        defer out.deinit();
+        for (self.statements.items) |stmt| {
+            try out.append(try stmt.string(allocator));
+        }
+
+        return try std.mem.join(allocator, "\n", out.items);
+    }
 };
 
 pub const Identifier = struct {
@@ -57,7 +100,7 @@ pub const Identifier = struct {
     value: []const u8,
 };
 
-pub const LetStatement =  struct {
+pub const LetStatement = struct {
     token: token.Token, // token.Token.let
     name: *Identifier,
     value: ?Expression,
@@ -67,3 +110,35 @@ pub const ReturnStatement = struct {
     token: token.Token, // token.Token.return
     return_value: ?Expression,
 };
+
+pub const ExpressionStatement = struct {
+    token: token.Token, // the first token of the expression
+    expression: ?Expression,
+};
+
+test "stringify statement" {
+    std.debug.print("\n", .{});
+
+    var prog_arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer prog_arena.deinit();
+    const allocator = prog_arena.allocator();
+
+    const let_stmt = try allocator.create(Statement);
+    const ident = try allocator.create(Identifier);
+
+    ident.* = .{
+        .token = .{ .ident = "myVar" },
+        .value = "myVar",
+    };
+
+    let_stmt.* = .{ .let = .{ .token = .{ .let = "let" }, .name = ident, .value = .{ .ident = .{
+        .token = .{ .ident = "anotherVar" },
+        .value = "anotherVar",
+    } } } };
+
+    var program = try Program.new(allocator);
+    try program.statements.append(let_stmt.*);
+
+    std.debug.print("{s}\n", .{try program.string(allocator)});
+    try t.expectEqualStrings(try program.string(allocator), "let myVar = anotherVar;");
+}

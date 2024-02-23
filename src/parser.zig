@@ -9,7 +9,21 @@ const ArrayListStrErr = std.ArrayList([]const u8);
 const ParserError = error{
     InvalidStatementToken,
     UnexpectedToken,
+    NoParseFunction,
 };
+
+const Precedence = enum {
+    lowest,
+    equals, // ==
+    lessgreater, // > or <
+    sum, // +
+    product, // *
+    prefix, // -X or !X
+    call, // myFunction(X)
+};
+
+const PrefixParseFn = *const fn (*Parser, Allocator) ast.Expression;
+const InfixParseFn = *const fn (*Parser, Allocator, ast.Expression) ast.Expression;
 
 const Parser = struct {
     lex: *lexer.Lexer,
@@ -17,16 +31,38 @@ const Parser = struct {
     peek_token: token.Token,
     errors: ArrayListStrErr,
 
+    parse_fn_buff: [1024 * 4]u8,
+    parse_fn_allocator: Allocator,
+
+    prefix_parse_fns: std.AutoHashMap(token.TokenType, PrefixParseFn),
+    infix_parse_fns: std.AutoHashMap(token.TokenType, InfixParseFn),
+
     pub fn new(allocator: Allocator, lex: *lexer.Lexer) !*Parser {
         const parser = try allocator.create(Parser);
         parser.lex = lex;
         parser.peek_token = token.Token{ .illegal = "" };
         parser.errors = ArrayListStrErr.init(allocator);
 
+        var fixed_buff = std.heap.FixedBufferAllocator.init(&parser.parse_fn_buff);
+        parser.parse_fn_allocator = fixed_buff.allocator();
+
+        parser.prefix_parse_fns = std.AutoHashMap(token.TokenType, PrefixParseFn).init(parser.parse_fn_allocator);
+        parser.infix_parse_fns = std.AutoHashMap(token.TokenType, InfixParseFn).init(parser.parse_fn_allocator);
+
         parser.nextToken();
         parser.nextToken();
 
+        try parser.registerPrefix(token.TokenType.ident, Parser.parseIdentifier);
+
         return parser;
+    }
+
+    fn registerPrefix(self: *Parser, token_type: token.TokenType, func: PrefixParseFn) !void {
+        try self.prefix_parse_fns.put(token_type, func);
+    }
+
+    fn registerInfix(self: *Parser, token_type: token.TokenType, func: InfixParseFn) !void {
+        try self.infix_parse_fns.put(token_type, func);
     }
 
     fn nextToken(self: *Parser) void {
@@ -73,8 +109,52 @@ const Parser = struct {
         switch (self.cur_token) {
             .let => return try self.parseLetStatement(allocator),
             .@"return" => return try self.parseReturnStatement(allocator),
-            else => return ParserError.InvalidStatementToken,
+            else => return self.parseExpressionStatement(allocator),
         }
+    }
+
+    fn parseExpressionStatement(self: *Parser, allocator: Allocator) !*ast.Node {
+        const stmt = try allocator.create(ast.Node);
+        const expr = try self.parseExpression(Precedence.lowest, allocator);
+
+        stmt.* = .{ .statement = .{ .expression = .{
+            .token = self.cur_token,
+            .expression = expr,
+        } } };
+
+        if (self.peekTokenIs(.semicolon)) {
+            self.nextToken();
+        }
+
+        return stmt;
+    }
+
+    fn parseExpression(self: *Parser, precedence: Precedence, allocator: Allocator) !ast.Expression {
+        const prefix = self.prefix_parse_fns.get(std.meta.activeTag(self.cur_token));
+        var left_expr: ast.Expression = undefined;
+
+        _ = precedence;
+        if (prefix) |func| {
+            std.debug.print("TAG???: {any}\n", .{std.meta.activeTag(self.cur_token)});
+            std.debug.print("TAG???: {any}\n", .{.ident});
+
+            left_expr = func(self, allocator);
+        } else {
+            return ParserError.NoParseFunction;
+        }
+
+        return left_expr;
+    }
+
+    fn parseIdentifier(self: *Parser, allocator: Allocator) ast.Expression {
+        const out: ast.Expression = .{ .ident = .{
+            .token = self.cur_token,
+            .value = self.cur_token.literal(allocator) catch {
+                @panic("failed to allocate literal");
+            },
+        } };
+
+        return out;
     }
 
     fn parseReturnStatement(self: *Parser, allocator: Allocator) !*ast.Node {
@@ -151,9 +231,7 @@ test "let statements" {
 
     const input =
         \\let x = 5;
-        \\let x;
         \\let y = 10;
-        \\bet
         \\let foobar = 838383;
     ;
 
@@ -234,4 +312,28 @@ test "return statements" {
             std.debug.print("{s}\n", .{msg});
         }
     }
+}
+
+test "identifier expression" {
+    std.debug.print("\n", .{});
+
+    const input =
+        \\foobar;
+    ;
+
+    var prog_arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer prog_arena.deinit();
+    const allocator = prog_arena.allocator();
+
+    const lex = try lexer.Lexer.new(allocator, input);
+    const par = try Parser.new(allocator, lex);
+    const prog = try par.parseProgram(allocator);
+
+    try t.expectEqual(1, prog.statements.items.len);
+
+    const expectedStatements: [1]ast.Statement = .{
+        .{ .expression = .{ .token = .{ .ident = "foobar" }, .expression = .{ .ident = .{ .token = .{ .ident = "foobar" }, .value = "foobar" } } } },
+    };
+
+    try t.expectEqualDeep(&expectedStatements, prog.statements.items);
 }
