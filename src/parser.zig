@@ -6,7 +6,7 @@ const Allocator = std.mem.Allocator;
 const t = std.testing;
 const ArrayListStrErr = std.ArrayList([]const u8);
 
-const ParserError = error {
+const ParserError = error{
     InvalidStatementToken,
     UnexpectedToken,
 };
@@ -20,7 +20,7 @@ const Parser = struct {
     pub fn new(allocator: Allocator, lex: *lexer.Lexer) !*Parser {
         const parser = try allocator.create(Parser);
         parser.lex = lex;
-        parser.peek_token = token.Token{.illegal = ""};
+        parser.peek_token = token.Token{ .illegal = "" };
         parser.errors = ArrayListStrErr.init(allocator);
 
         parser.nextToken();
@@ -66,8 +66,7 @@ const Parser = struct {
     }
 
     fn formatError(self: *Parser, allocator: Allocator, err: ParserError) ![]const u8 {
-        return try std.fmt.allocPrint(allocator, "caught parser errors `{!}`:\n    tokenType: .{s}\n    literal: {s}",
-                                               .{err, self.cur_token.tokenType(), try self.cur_token.literal(allocator)});
+        return try std.fmt.allocPrint(allocator, "caught parser errors `{!}`:\n    tokenType: .{s}\n    literal: {s}", .{ err, self.cur_token.tokenType(), try self.cur_token.literal(allocator) });
     }
 
     fn parseStatement(self: *Parser, allocator: Allocator) !*ast.Node {
@@ -80,14 +79,10 @@ const Parser = struct {
 
     fn parseReturnStatement(self: *Parser, allocator: Allocator) !*ast.Node {
         const rtn = try allocator.create(ast.Node);
-        rtn.* = .{
-            .statement = .{
-                .@"return" = .{
-                    .token = self.cur_token,
-                    .return_value = null,
-                }
-            }
-        };
+        rtn.* = .{ .statement = .{ .@"return" = .{
+            .token = self.cur_token,
+            .return_value = null,
+        } } };
 
         self.nextToken();
 
@@ -115,15 +110,11 @@ const Parser = struct {
         };
 
         const let = try allocator.create(ast.Node);
-        let.* = .{
-            .statement = .{
-                .let = .{
-                    .token = tok_let,
-                    .name = ident,
-                    .value = null,
-                }
-            }
-        };
+        let.* = .{ .statement = .{ .let = .{
+            .token = tok_let,
+            .name = ident,
+            .value = null,
+        } } };
 
         if (!self.expectPeek(.assign)) {
             return ParserError.UnexpectedToken;
@@ -156,7 +147,7 @@ const Parser = struct {
 };
 
 test "let statements" {
-    std.debug.print("\n",. {});
+    std.debug.print("\n", .{});
 
     const input =
         \\let x = 5;
@@ -182,15 +173,15 @@ test "let statements" {
     // }
 
     var expectedIdentifiers: [3]ast.Identifier = .{
-        .{ .token = .{.ident = "x"}, .value = "x" },
-        .{ .token = .{.ident = "y"}, .value = "y" },
-        .{ .token = .{.ident = "foobar"}, .value = "foobar" },
+        .{ .token = .{ .ident = "x" }, .value = "x" },
+        .{ .token = .{ .ident = "y" }, .value = "y" },
+        .{ .token = .{ .ident = "foobar" }, .value = "foobar" },
     };
 
     const expectedStatements: [3]ast.Statement = .{
-        .{.let = .{ .token = .{.let = "let"}, .name = &expectedIdentifiers[0], .value = null }},
-        .{.let = .{ .token = .{.let = "let"}, .name = &expectedIdentifiers[1], .value = null }},
-        .{.let = .{ .token = .{.let = "let"}, .name = &expectedIdentifiers[2], .value = null }},
+        .{ .let = .{ .token = .{ .let = "let" }, .name = &expectedIdentifiers[0], .value = null } },
+        .{ .let = .{ .token = .{ .let = "let" }, .name = &expectedIdentifiers[1], .value = null } },
+        .{ .let = .{ .token = .{ .let = "let" }, .name = &expectedIdentifiers[2], .value = null } },
     };
 
     try t.expectEqualDeep(&expectedStatements, prog.statements.items);
@@ -204,7 +195,7 @@ test "let statements" {
 }
 
 test "return statements" {
-    std.debug.print("\n",. {});
+    std.debug.print("\n", .{});
 
     const input =
         \\return x;
@@ -229,10 +220,10 @@ test "return statements" {
     // }
 
     const expectedStatements: [4]ast.Statement = .{
-        .{.@"return" = .{ .token = .{.@"return" = "return"}, .return_value = null }},
-        .{.@"return" = .{ .token = .{.@"return" = "return"}, .return_value = null }},
-        .{.@"return" = .{ .token = .{.@"return" = "return"}, .return_value = null }},
-        .{.@"return" = .{ .token = .{.@"return" = "return"}, .return_value = null }},
+        .{ .@"return" = .{ .token = .{ .@"return" = "return" }, .return_value = null } },
+        .{ .@"return" = .{ .token = .{ .@"return" = "return" }, .return_value = null } },
+        .{ .@"return" = .{ .token = .{ .@"return" = "return" }, .return_value = null } },
+        .{ .@"return" = .{ .token = .{ .@"return" = "return" }, .return_value = null } },
     };
 
     try t.expectEqualDeep(&expectedStatements, prog.statements.items);
