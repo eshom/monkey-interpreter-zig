@@ -9,7 +9,7 @@ pub const Token = union(enum) {
     eof: []const u8,
 
     ident: []const u8,
-    int: u64,
+    int: i64,
 
     assign: []const u8,
     plus: []const u8,
@@ -34,20 +34,17 @@ pub const Token = union(enum) {
 
     function: []const u8,
     let: []const u8,
-    @"true": bool,
-    @"false": bool,
+    true: bool,
+    false: bool,
     @"if": []const u8,
     @"else": []const u8,
     @"return": []const u8,
 
     pub fn print(self: *const Token, out: std.fs.File.Writer) !void {
         switch (self.*) {
-            .illegal, .eof, .ident, .assign, .plus, .minus, .bang, .asterix, .slash,
-            .lt, .gt, .eq, .not_eq, .comma, .semicolon, .lparen, .rparen, .lbrace, .rbrace,
-            .function, .let, .@"if", .@"else",
-            .@"return" => |v| try out.print("Type: {s:<10} || Literal: {s}\n", .{@tagName(self.*), v}),
-            .int => |v| try out.print("Type: {s:<10} || Literal: {d}\n", .{@tagName(self.*), v}),
-            .true, .false => |v| try out.print("Type: {s:<10} || Literal: {any}\n", .{@tagName(self.*), v}),
+            .illegal, .eof, .ident, .assign, .plus, .minus, .bang, .asterix, .slash, .lt, .gt, .eq, .not_eq, .comma, .semicolon, .lparen, .rparen, .lbrace, .rbrace, .function, .let, .@"if", .@"else", .@"return" => |v| try out.print("Type: {s:<10} || Literal: {s}\n", .{ @tagName(self.*), v }),
+            .int => |v| try out.print("Type: {s:<10} || Literal: {d}\n", .{ @tagName(self.*), v }),
+            .true, .false => |v| try out.print("Type: {s:<10} || Literal: {any}\n", .{ @tagName(self.*), v }),
         }
     }
 
@@ -59,10 +56,7 @@ pub const Token = union(enum) {
         var out: []u8 = undefined;
 
         switch (self.*) {
-            .illegal, .eof, .ident, .assign, .plus, .minus, .bang, .asterix, .slash,
-            .lt, .gt, .eq, .not_eq, .comma, .semicolon, .lparen, .rparen, .lbrace, .rbrace,
-            .function, .let, .@"if", .@"else",
-            .@"return" => |v| out = try std.fmt.allocPrint(allocator, "{s}", .{v}),
+            .illegal, .eof, .ident, .assign, .plus, .minus, .bang, .asterix, .slash, .lt, .gt, .eq, .not_eq, .comma, .semicolon, .lparen, .rparen, .lbrace, .rbrace, .function, .let, .@"if", .@"else", .@"return" => |v| out = try std.fmt.allocPrint(allocator, "{s}", .{v}),
             .int => |v| out = try std.fmt.allocPrint(allocator, "{d}", .{v}),
             .true, .false => |v| out = try std.fmt.allocPrint(allocator, "{any}", .{v}),
         }
@@ -72,22 +66,22 @@ pub const Token = union(enum) {
 };
 
 const keywords = std.comptime_string_map.ComptimeStringMap(Token, .{
-    .{"fn", Token{.function = "fn"}},
-    .{"let", Token{.let = "let"}},
-    .{"true", Token{.@"true" = true}},
-    .{"false", Token{.@"false" = false}},
-    .{"if", Token{.@"if" = "if"}},
-    .{"else", Token{.@"else" = "else"}},
-    .{"return", Token{.@"return" = "return"}},
+    .{ "fn", Token{ .function = "fn" } },
+    .{ "let", Token{ .let = "let" } },
+    .{ "true", Token{ .true = true } },
+    .{ "false", Token{ .false = false } },
+    .{ "if", Token{ .@"if" = "if" } },
+    .{ "else", Token{ .@"else" = "else" } },
+    .{ "return", Token{ .@"return" = "return" } },
 });
 
 pub fn lookupIdent(ident: []const u8) Token {
-    return keywords.get(ident) orelse Token{.ident = ident};
+    return keywords.get(ident) orelse Token{ .ident = ident };
 }
 
 test "token print and literal" {
-    std.debug.print("\n",. {});
-    const tok = Token{.ident = "testIdent"};
+    std.debug.print("\n", .{});
+    const tok = Token{ .ident = "testIdent" };
     const literal = try tok.literal(t.allocator);
     defer t.allocator.free(literal);
     try t.expectEqualStrings("testIdent", literal);

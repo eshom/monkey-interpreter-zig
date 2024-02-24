@@ -33,10 +33,10 @@ pub const Lexer = struct {
 
         self.skipWS();
 
-        switch(self.ch) {
+        switch (self.ch) {
             '=' => {
                 if (self.peekChar() == '=') {
-                    tok = .{ .eq = self.input[self.position..self.read_pos+1] };
+                    tok = .{ .eq = self.input[self.position .. self.read_pos + 1] };
                     self.readChar();
                 } else {
                     tok = .{ .assign = self.input[self.position..self.read_pos] };
@@ -44,7 +44,7 @@ pub const Lexer = struct {
             },
             '!' => {
                 if (self.peekChar() == '=') {
-                    tok = .{ .not_eq = self.input[self.position..self.read_pos+1] };
+                    tok = .{ .not_eq = self.input[self.position .. self.read_pos + 1] };
                     self.readChar();
                 } else {
                     tok = .{ .bang = self.input[self.position..self.read_pos] };
@@ -100,7 +100,7 @@ pub const Lexer = struct {
         }
     }
 
-    fn readNumber(self: *Lexer) ?u64 {
+    fn readNumber(self: *Lexer) ?i64 {
         const pos = self.position;
 
         while (std.ascii.isDigit(self.ch) and std.ascii.isDigit(self.peekChar())) {
@@ -108,7 +108,7 @@ pub const Lexer = struct {
         }
 
         const num_str = self.input[pos..self.read_pos];
-        return std.fmt.parseInt(u64, num_str, 10) catch return null;
+        return std.fmt.parseInt(i64, num_str, 10) catch return null;
     }
 
     fn peekChar(self: *Lexer) u8 {
@@ -124,14 +124,14 @@ test "next token" {
     const input = "=+(){},;";
 
     const expected = [_]token.Token{
-        .{.assign = "="},
-        .{.plus = "+"},
-        .{.lparen = "("},
-        .{.rparen = ")"},
-        .{.lbrace = "{"},
-        .{.rbrace = "}"},
-        .{.comma = ","},
-        .{.semicolon = ";"},
+        .{ .assign = "=" },
+        .{ .plus = "+" },
+        .{ .lparen = "(" },
+        .{ .rparen = ")" },
+        .{ .lbrace = "{" },
+        .{ .rbrace = "}" },
+        .{ .comma = "," },
+        .{ .semicolon = ";" },
     };
 
     var lex = try Lexer.new(t.allocator, input);
@@ -156,42 +156,42 @@ test "next token real code" {
     ;
 
     const expected = [_]token.Token{
-        .{.let = "let"},
-        .{.ident = "five"},
-        .{.assign = "="},
-        .{.int = 5},
-        .{.semicolon = ";"},
-        .{.let = "let"},
-        .{.ident = "ten"},
-        .{.assign = "="},
-        .{.int = 10},
-        .{.semicolon = ";"},
-        .{.let = "let"},
-        .{.ident = "add"},
-        .{.assign = "="},
-        .{.function = "fn"},
-        .{.lparen = "("},
-        .{.ident = "x"},
-        .{.comma = ","},
-        .{.ident = "y"},
-        .{.rparen = ")"},
-        .{.lbrace = "{"},
-        .{.ident = "x"},
-        .{.plus = "+"},
-        .{.ident = "y"},
-        .{.semicolon = ";"},
-        .{.rbrace = "}"},
-        .{.semicolon = ";"},
-        .{.let = "let"},
-        .{.ident = "result"},
-        .{.assign = "="},
-        .{.ident = "add"},
-        .{.lparen = "("},
-        .{.ident = "five"},
-        .{.comma = ","},
-        .{.ident = "ten"},
-        .{.rparen = ")"},
-        .{.semicolon = ";"},
+        .{ .let = "let" },
+        .{ .ident = "five" },
+        .{ .assign = "=" },
+        .{ .int = 5 },
+        .{ .semicolon = ";" },
+        .{ .let = "let" },
+        .{ .ident = "ten" },
+        .{ .assign = "=" },
+        .{ .int = 10 },
+        .{ .semicolon = ";" },
+        .{ .let = "let" },
+        .{ .ident = "add" },
+        .{ .assign = "=" },
+        .{ .function = "fn" },
+        .{ .lparen = "(" },
+        .{ .ident = "x" },
+        .{ .comma = "," },
+        .{ .ident = "y" },
+        .{ .rparen = ")" },
+        .{ .lbrace = "{" },
+        .{ .ident = "x" },
+        .{ .plus = "+" },
+        .{ .ident = "y" },
+        .{ .semicolon = ";" },
+        .{ .rbrace = "}" },
+        .{ .semicolon = ";" },
+        .{ .let = "let" },
+        .{ .ident = "result" },
+        .{ .assign = "=" },
+        .{ .ident = "add" },
+        .{ .lparen = "(" },
+        .{ .ident = "five" },
+        .{ .comma = "," },
+        .{ .ident = "ten" },
+        .{ .rparen = ")" },
+        .{ .semicolon = ";" },
     };
 
     var lex = try Lexer.new(t.allocator, input);
@@ -229,83 +229,83 @@ test "next token extended" {
     ;
 
     const expected = [_]token.Token{
-        .{.let = "let"},
-        .{.ident = "five"},
-        .{.assign = "="},
-        .{.int = 5},
-        .{.semicolon = ";"},
-        .{.let = "let"},
-        .{.ident = "ten"},
-        .{.assign = "="},
-        .{.int = 10},
-        .{.semicolon = ";"},
-        .{.let = "let"},
-        .{.ident = "add"},
-        .{.assign = "="},
-        .{.function = "fn"},
-        .{.lparen = "("},
-        .{.ident = "x"},
-        .{.comma = ","},
-        .{.ident = "y"},
-        .{.rparen = ")"},
-        .{.lbrace = "{"},
-        .{.ident = "x"},
-        .{.plus = "+"},
-        .{.ident = "y"},
-        .{.semicolon = ";"},
-        .{.rbrace = "}"},
-        .{.semicolon = ";"},
-        .{.let = "let"},
-        .{.ident = "result"},
-        .{.assign = "="},
-        .{.ident = "add"},
-        .{.lparen = "("},
-        .{.ident = "five"},
-        .{.comma = ","},
-        .{.ident = "ten"},
-        .{.rparen = ")"},
-        .{.semicolon = ";"},
+        .{ .let = "let" },
+        .{ .ident = "five" },
+        .{ .assign = "=" },
+        .{ .int = 5 },
+        .{ .semicolon = ";" },
+        .{ .let = "let" },
+        .{ .ident = "ten" },
+        .{ .assign = "=" },
+        .{ .int = 10 },
+        .{ .semicolon = ";" },
+        .{ .let = "let" },
+        .{ .ident = "add" },
+        .{ .assign = "=" },
+        .{ .function = "fn" },
+        .{ .lparen = "(" },
+        .{ .ident = "x" },
+        .{ .comma = "," },
+        .{ .ident = "y" },
+        .{ .rparen = ")" },
+        .{ .lbrace = "{" },
+        .{ .ident = "x" },
+        .{ .plus = "+" },
+        .{ .ident = "y" },
+        .{ .semicolon = ";" },
+        .{ .rbrace = "}" },
+        .{ .semicolon = ";" },
+        .{ .let = "let" },
+        .{ .ident = "result" },
+        .{ .assign = "=" },
+        .{ .ident = "add" },
+        .{ .lparen = "(" },
+        .{ .ident = "five" },
+        .{ .comma = "," },
+        .{ .ident = "ten" },
+        .{ .rparen = ")" },
+        .{ .semicolon = ";" },
 
-        .{.bang = "!"},
-        .{.minus = "-"},
-        .{.slash = "/"},
-        .{.asterix = "*"},
-        .{.int = 5},
-        .{.semicolon = ";"},
+        .{ .bang = "!" },
+        .{ .minus = "-" },
+        .{ .slash = "/" },
+        .{ .asterix = "*" },
+        .{ .int = 5 },
+        .{ .semicolon = ";" },
 
-        .{.int = 5},
-        .{.lt = "<"},
-        .{.int = 10},
-        .{.gt = ">"},
-        .{.int = 5},
-        .{.semicolon = ";"},
+        .{ .int = 5 },
+        .{ .lt = "<" },
+        .{ .int = 10 },
+        .{ .gt = ">" },
+        .{ .int = 5 },
+        .{ .semicolon = ";" },
 
-        .{.@"if" = "if"},
-        .{.lparen = "("},
-        .{.int = 5},
-        .{.lt = "<"},
-        .{.int = 10},
-        .{.rparen = ")"},
-        .{.lbrace = "{"},
-        .{.@"return" = "return"},
-        .{.@"true" = true},
-        .{.semicolon = ";"},
-        .{.rbrace = "}"},
-        .{.@"else" = "else"},
-        .{.lbrace = "{"},
-        .{.@"return" = "return"},
-        .{.@"false" = false},
-        .{.semicolon = ";"},
-        .{.rbrace = "}"},
+        .{ .@"if" = "if" },
+        .{ .lparen = "(" },
+        .{ .int = 5 },
+        .{ .lt = "<" },
+        .{ .int = 10 },
+        .{ .rparen = ")" },
+        .{ .lbrace = "{" },
+        .{ .@"return" = "return" },
+        .{ .true = true },
+        .{ .semicolon = ";" },
+        .{ .rbrace = "}" },
+        .{ .@"else" = "else" },
+        .{ .lbrace = "{" },
+        .{ .@"return" = "return" },
+        .{ .false = false },
+        .{ .semicolon = ";" },
+        .{ .rbrace = "}" },
 
-        .{.int = 10},
-        .{.eq = "=="},
-        .{.int = 10},
-        .{.semicolon = ";"},
-        .{.int = 10},
-        .{.not_eq = "!="},
-        .{.int = 9},
-        .{.semicolon = ";"},
+        .{ .int = 10 },
+        .{ .eq = "==" },
+        .{ .int = 10 },
+        .{ .semicolon = ";" },
+        .{ .int = 10 },
+        .{ .not_eq = "!=" },
+        .{ .int = 9 },
+        .{ .semicolon = ";" },
     };
 
     var lex = try Lexer.new(t.allocator, input);

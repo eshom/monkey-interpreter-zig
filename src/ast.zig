@@ -50,20 +50,26 @@ pub const Statement = union(enum) {
 
 pub const Expression = union(enum) {
     ident: Identifier,
+    int: IntegerLiteral,
+    prefix: PrefixExpression,
 
     pub fn tokenLiteral(self: *const Expression, allocator: Allocator) ![]const u8 {
         switch (self.*) {
-            .ident => |exp| return try exp.token.literal(allocator),
+            .ident, .int, .prefix => |exp| return try exp.token.literal(allocator),
         }
     }
 
     pub fn string(self: *const Expression, allocator: Allocator) ![]const u8 {
-        _ = allocator;
         switch (self.*) {
             .ident => |exp| return exp.value,
+            .int => |exp| return try exp.token.literal(allocator),
+            .prefix => |exp| {
+                return try std.fmt.allocPrint(allocator, "({s}{s})", .{
+                    exp.op,
+                    if (exp.right) |right| try right.string(allocator) else "null",
+                });
+            },
         }
-
-        unreachable;
     }
 };
 
@@ -114,6 +120,17 @@ pub const ReturnStatement = struct {
 pub const ExpressionStatement = struct {
     token: token.Token, // the first token of the expression
     expression: ?Expression,
+};
+
+pub const IntegerLiteral = struct {
+    token: token.Token, // token.Token.int
+    value: i64,
+};
+
+pub const PrefixExpression = struct {
+    token: token.Token, // the prefix token, e.g. !
+    op: []const u8,
+    right: ?*Expression,
 };
 
 test "stringify statement" {
