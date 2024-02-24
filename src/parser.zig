@@ -23,19 +23,42 @@ const Precedence = enum {
 };
 
 const PrefixParseFn = *const fn (*Parser, Allocator) anyerror!ast.Expression;
-const InfixParseFn = *const fn (*Parser, Allocator, ast.Expression) anyerror!ast.Expression;
+const InfixParseFn = *const fn (*Parser, Allocator, *ast.Expression) anyerror!ast.Expression;
 
 const Parser = struct {
     lex: *lexer.Lexer,
     cur_token: token.Token,
     peek_token: token.Token,
     errors: ArrayListStrErr,
+    trace_calls: struct { bool, usize } = .{ false, 0 }, // set to true to enable debug tracing
 
     parse_fn_buff: [1024]u8,
     parse_fn_allocator: Allocator,
 
     prefix_parse_fns: std.AutoHashMap(token.TokenType, PrefixParseFn),
     infix_parse_fns: std.AutoHashMap(token.TokenType, InfixParseFn),
+
+    precedence_table: std.AutoHashMap(token.TokenType, Precedence),
+
+    fn trace(self: *Parser, msg: []const u8) void {
+        if (self.trace_calls.@"0") {
+            for (0..self.trace_calls.@"1") |_| {
+                std.debug.print(" " ** 8, .{});
+            }
+            self.trace_calls.@"1" += 1;
+            std.debug.print("BEGIN {s}\n", .{msg});
+        }
+    }
+
+    fn untrace(self: *Parser, msg: []const u8) void {
+        if (self.trace_calls.@"0") {
+            self.trace_calls.@"1" -= 1;
+            for (0..self.trace_calls.@"1") |_| {
+                std.debug.print(" " ** 8, .{});
+            }
+            std.debug.print("END {s}\n", .{msg});
+        }
+    }
 
     pub fn new(allocator: Allocator, lex: *lexer.Lexer) !*Parser {
         const parser = try allocator.create(Parser);
@@ -48,9 +71,22 @@ const Parser = struct {
 
         parser.prefix_parse_fns = std.AutoHashMap(token.TokenType, PrefixParseFn).init(parser.parse_fn_allocator);
         parser.infix_parse_fns = std.AutoHashMap(token.TokenType, InfixParseFn).init(parser.parse_fn_allocator);
+        parser.precedence_table = std.AutoHashMap(token.TokenType, Precedence).init(parser.parse_fn_allocator);
 
         parser.nextToken();
         parser.nextToken();
+
+        // Populate precedence table
+        const tokens = comptime [_]token.TokenType{
+            .eq, .not_eq, .lt, .gt, .plus, .minus, .slash, .asterix,
+        };
+        const precedences = comptime [_]Precedence{
+            .equals, .equals, .lessgreater, .lessgreater, .sum, .sum, .product, .product,
+        };
+
+        inline for (tokens, precedences) |tok_t, prec| {
+            try parser.precedence_table.put(tok_t, prec);
+        }
 
         // Prefix parse functions
         try parser.registerPrefix(token.TokenType.ident, Parser.parseIdentifier);
@@ -58,7 +94,35 @@ const Parser = struct {
         try parser.registerPrefix(token.TokenType.bang, Parser.parsePrefixExpression);
         try parser.registerPrefix(token.TokenType.minus, Parser.parsePrefixExpression);
 
+        // Infix parse functions
+        try parser.registerInfix(token.TokenType.plus, Parser.parseInfixExpression);
+        try parser.registerInfix(token.TokenType.minus, Parser.parseInfixExpression);
+        try parser.registerInfix(token.TokenType.slash, Parser.parseInfixExpression);
+        try parser.registerInfix(token.TokenType.asterix, Parser.parseInfixExpression);
+        try parser.registerInfix(token.TokenType.eq, Parser.parseInfixExpression);
+        try parser.registerInfix(token.TokenType.not_eq, Parser.parseInfixExpression);
+        try parser.registerInfix(token.TokenType.lt, Parser.parseInfixExpression);
+        try parser.registerInfix(token.TokenType.gt, Parser.parseInfixExpression);
+
         return parser;
+    }
+
+    fn peekPrecedence(self: *Parser) Precedence {
+        const prec = self.precedence_table.get(std.meta.activeTag(self.peek_token));
+        if (prec) |p| {
+            return p;
+        } else {
+            return Precedence.lowest;
+        }
+    }
+
+    fn curPrecedence(self: *Parser) Precedence {
+        const prec = self.precedence_table.get(std.meta.activeTag(self.cur_token));
+        if (prec) |p| {
+            return p;
+        } else {
+            return Precedence.lowest;
+        }
     }
 
     fn registerPrefix(self: *Parser, token_type: token.TokenType, func: PrefixParseFn) !void {
@@ -123,6 +187,9 @@ const Parser = struct {
     }
 
     fn parseExpressionStatement(self: *Parser, allocator: Allocator) !*ast.Node {
+        self.trace("parseExpressionStatement");
+        defer self.untrace("parseExpressionStatement");
+
         const stmt = try allocator.create(ast.Node);
         const expr = try self.parseExpression(Precedence.lowest, allocator);
 
@@ -139,14 +206,26 @@ const Parser = struct {
     }
 
     fn parseExpression(self: *Parser, precedence: Precedence, allocator: Allocator) !ast.Expression {
+        self.trace("parseExpression");
+        defer self.untrace("parseExpression");
+
         const prefix = self.prefix_parse_fns.get(std.meta.activeTag(self.cur_token));
         var left_expr: ast.Expression = undefined;
 
-        _ = precedence;
         if (prefix) |func| {
             left_expr = try func(self, allocator);
         } else {
             return ParserError.NoPrefixParseFunction;
+        }
+
+        while (self.peek_token != .semicolon and @intFromEnum(precedence) < @intFromEnum(self.peekPrecedence())) {
+            const infix = self.infix_parse_fns.get(std.meta.activeTag(self.peek_token));
+            if (infix) |func| {
+                self.nextToken();
+                left_expr = try func(self, allocator, &left_expr);
+            } else {
+                return left_expr;
+            }
         }
 
         return left_expr;
@@ -162,12 +241,18 @@ const Parser = struct {
     }
 
     fn parseIntegerLiteral(self: *Parser, allocator: Allocator) !ast.Expression {
+        self.trace("parseIntegerLiteral");
+        defer self.untrace("parseIntegerLiteral");
+
         _ = allocator;
         const lit: ast.Expression = .{ .int = .{ .token = self.cur_token, .value = self.cur_token.int } };
         return lit;
     }
 
     fn parsePrefixExpression(self: *Parser, allocator: Allocator) !ast.Expression {
+        self.trace("parsePrefixExpression");
+        defer self.untrace("parsePrefixExpression");
+
         var exp: ast.Expression = .{ .prefix = .{
             .token = self.cur_token,
             .op = try self.cur_token.literal(allocator),
@@ -180,6 +265,31 @@ const Parser = struct {
 
         exp.prefix.right = try allocator.create(ast.Expression);
         exp.prefix.right.?.* = right_exp;
+
+        return exp;
+    }
+
+    fn parseInfixExpression(self: *Parser, allocator: Allocator, left: *ast.Expression) !ast.Expression {
+        self.trace("parseInfixExpression");
+        defer self.untrace("parseInfixExpression");
+
+        var exp: ast.Expression = .{ .infix = .{
+            .token = self.cur_token,
+            .op = try self.cur_token.literal(allocator),
+            .left = null,
+            .right = null,
+        } };
+
+        const precedence = self.curPrecedence();
+        self.nextToken();
+
+        const right_exp = try self.parseExpression(precedence, allocator);
+
+        exp.infix.right = try allocator.create(ast.Expression);
+        exp.infix.right.?.* = right_exp;
+
+        exp.infix.left = try allocator.create(ast.Expression);
+        exp.infix.left.?.* = left.*;
 
         return exp;
     }
@@ -443,4 +553,112 @@ test "prefix operator" {
     for (expected_statements, 0..) |exp, i| {
         try t.expectEqualStrings(try exp.string(allocator), try prog.statements.items[i].string(allocator));
     }
+}
+
+test "infix parsing" {
+    std.debug.print("\n", .{});
+
+    const input =
+        \\5 + 5;
+        \\5 - 5;
+        \\5 * 5;
+        \\5 / 5;
+        \\5 > 5;
+        \\5 < 5;
+        \\5 == 5;
+        \\5 != 5;
+    ;
+
+    var prog_arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer prog_arena.deinit();
+    const allocator = prog_arena.allocator();
+
+    const lex = try lexer.Lexer.new(allocator, input);
+    const par = try Parser.new(allocator, lex);
+    const prog = try par.parseProgram(allocator);
+
+    try t.expectEqual(8, prog.statements.items.len);
+
+    if (par.errors.items.len > 0) {
+        par.printErrors();
+    }
+
+    try t.expect(!par.checkErrors());
+
+    const expected_strings: [8][]const u8 = .{
+        "(5 + 5)",
+        "(5 - 5)",
+        "(5 * 5)",
+        "(5 / 5)",
+        "(5 > 5)",
+        "(5 < 5)",
+        "(5 == 5)",
+        "(5 != 5)",
+    };
+
+    for (expected_strings, prog.statements.items) |exp, stmt| {
+        //std.debug.print("expected: {s}, found: {s}\n", .{ exp, try stmt.string(allocator) });
+        try t.expectEqualStrings(exp, try stmt.string(allocator));
+    }
+}
+
+test "operator precedence parsing" {
+    std.debug.print("\n", .{});
+
+    const input =
+        \\-a * b
+        \\!-a
+        \\a + b + c
+        \\a + b - c
+        \\a * b * c
+        \\a * b / c
+        \\a + b / c
+        \\a + b * c + d / e - f
+        \\3 + 4; -5 * 5
+        \\5 > 4 == 3 < 4
+        \\5 < 4 != 3 > 4
+        \\3 + 4 * 5 == 3 * 1 + 4 * 5
+        \\3 + 4 * 5 == 3 * 1 + 4 * 5
+    ;
+
+    var prog_arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer prog_arena.deinit();
+    const allocator = prog_arena.allocator();
+
+    const lex = try lexer.Lexer.new(allocator, input);
+    const par = try Parser.new(allocator, lex);
+    //par.trace_calls = .{ true, 0 };
+    const prog = try par.parseProgram(allocator);
+
+    try t.expectEqual(14, prog.statements.items.len);
+
+    if (par.errors.items.len > 0) {
+        par.printErrors();
+    }
+
+    try t.expect(!par.checkErrors());
+
+    const expected_strings: [14][]const u8 = .{
+        "((-a) * b)",
+        "(!(-a))",
+        "((a + b) + c)",
+        "((a + b) - c)",
+        "((a * b) * c)",
+        "((a * b) / c)",
+        "(a + (b / c))",
+        "(((a + (b * c)) + (d / e)) - f)",
+        "(3 + 4)",
+        "((-5) * 5)",
+        "((5 > 4) == (3 < 4))",
+        "((5 < 4) != (3 > 4))",
+        "((3 + (4 * 5)) == ((3 * 1) + (4 * 5)))",
+        "((3 + (4 * 5)) == ((3 * 1) + (4 * 5)))",
+    };
+
+    for (expected_strings, prog.statements.items) |exp, stmt| {
+        //std.debug.print("expected: {s}, found: {s}\n", .{ exp, try stmt.string(allocator) });
+        try t.expectEqualStrings(exp, try stmt.string(allocator));
+    }
+
+    // try ast.Program.prettyPrint(try prog.string(allocator), std.io.getStdOut().writer());
 }

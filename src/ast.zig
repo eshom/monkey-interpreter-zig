@@ -52,10 +52,11 @@ pub const Expression = union(enum) {
     ident: Identifier,
     int: IntegerLiteral,
     prefix: PrefixExpression,
+    infix: InfixExpression,
 
     pub fn tokenLiteral(self: *const Expression, allocator: Allocator) ![]const u8 {
         switch (self.*) {
-            .ident, .int, .prefix => |exp| return try exp.token.literal(allocator),
+            .ident, .int, .prefix, .infix => |exp| return try exp.token.literal(allocator),
         }
     }
 
@@ -65,6 +66,13 @@ pub const Expression = union(enum) {
             .int => |exp| return try exp.token.literal(allocator),
             .prefix => |exp| {
                 return try std.fmt.allocPrint(allocator, "({s}{s})", .{
+                    exp.op,
+                    if (exp.right) |right| try right.string(allocator) else "null",
+                });
+            },
+            .infix => |exp| {
+                return try std.fmt.allocPrint(allocator, "({s} {s} {s})", .{
+                    if (exp.left) |left| try left.string(allocator) else "null",
                     exp.op,
                     if (exp.right) |right| try right.string(allocator) else "null",
                 });
@@ -99,6 +107,33 @@ pub const Program = struct {
 
         return try std.mem.join(allocator, "\n", out.items);
     }
+
+    pub fn prettyPrint(str: []const u8, writer: std.fs.File.Writer) !void {
+        var indent: usize = 0;
+
+        _ = try writer.write("####");
+        try writer.writeByte('\n');
+        for (str) |c| {
+            if (c == '(') {
+                try writer.writeByte('(');
+                for (0..indent + 2) |_| try writer.writeByte(' ');
+                try writer.writeByte('\n');
+                for (0..indent + 2) |_| try writer.writeByte(' ');
+                indent += 2;
+            } else if (c == ')') {
+                indent -= 2;
+                try writer.writeByte('\n');
+                for (0..indent) |_| try writer.writeByte(' ');
+                try writer.writeByte(')');
+            } else if (c == '\n') {
+                try writer.writeByte('\n');
+                _ = try writer.write("####");
+                try writer.writeByte('\n');
+            } else {
+                try writer.writeByte(c);
+            }
+        }
+    }
 };
 
 pub const Identifier = struct {
@@ -129,6 +164,13 @@ pub const IntegerLiteral = struct {
 
 pub const PrefixExpression = struct {
     token: token.Token, // the prefix token, e.g. !
+    op: []const u8,
+    right: ?*Expression,
+};
+
+pub const InfixExpression = struct {
+    token: token.Token, // the infix token, e.g. +
+    left: ?*Expression,
     op: []const u8,
     right: ?*Expression,
 };
