@@ -91,6 +91,8 @@ const Parser = struct {
         // Prefix parse functions
         try parser.registerPrefix(token.TokenType.ident, Parser.parseIdentifier);
         try parser.registerPrefix(token.TokenType.int, Parser.parseIntegerLiteral);
+        try parser.registerPrefix(token.TokenType.true, Parser.parseBoolean);
+        try parser.registerPrefix(token.TokenType.false, Parser.parseBoolean);
         try parser.registerPrefix(token.TokenType.bang, Parser.parsePrefixExpression);
         try parser.registerPrefix(token.TokenType.minus, Parser.parsePrefixExpression);
 
@@ -292,6 +294,11 @@ const Parser = struct {
         exp.infix.left.?.* = left.*;
 
         return exp;
+    }
+
+    fn parseBoolean(self: *Parser, allocator: Allocator) !ast.Expression {
+        _ = allocator;
+        return .{ .boolean = .{ .token = self.cur_token, .value = self.curTokenIs(token.TokenType.true) } };
     }
 
     fn parseReturnStatement(self: *Parser, allocator: Allocator) !*ast.Node {
@@ -661,4 +668,46 @@ test "operator precedence parsing" {
     }
 
     // try ast.Program.prettyPrint(try prog.string(allocator), std.io.getStdOut().writer());
+}
+
+test "boolean parsing" {
+    std.debug.print("\n", .{});
+
+    const input =
+        \\true;
+        \\false;
+        \\let foobar = true;
+        \\let barfoo = false;
+    ;
+
+    var prog_arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer prog_arena.deinit();
+    const allocator = prog_arena.allocator();
+
+    const lex = try lexer.Lexer.new(allocator, input);
+    const par = try Parser.new(allocator, lex);
+    const prog = try par.parseProgram(allocator);
+
+    try t.expectEqual(4, prog.statements.items.len);
+
+    if (par.errors.items.len > 0) {
+        par.printErrors();
+    }
+
+    try t.expect(!par.checkErrors());
+
+    const expected_strings: [4][]const u8 = .{
+        "true",
+        "false",
+        "let foobar = true",
+        "let barfoo = false",
+    };
+
+    std.debug.print("statement 2: {any}", .{prog.statements.items[1]});
+    std.debug.print("statement 3: {any}", .{prog.statements.items[2]});
+
+    for (expected_strings, prog.statements.items) |exp, stmt| {
+        //std.debug.print("expected: {s}, found: {s}\n", .{ exp, try stmt.string(allocator) });
+        try t.expectEqualStrings(exp, try stmt.string(allocator));
+    }
 }

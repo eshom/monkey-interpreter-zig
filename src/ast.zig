@@ -53,10 +53,11 @@ pub const Expression = union(enum) {
     int: IntegerLiteral,
     prefix: PrefixExpression,
     infix: InfixExpression,
+    boolean: Boolean,
 
     pub fn tokenLiteral(self: *const Expression, allocator: Allocator) ![]const u8 {
         switch (self.*) {
-            .ident, .int, .prefix, .infix => |exp| return try exp.token.literal(allocator),
+            .ident, .int, .prefix, .infix, .boolean => |exp| return try exp.token.literal(allocator),
         }
     }
 
@@ -64,6 +65,7 @@ pub const Expression = union(enum) {
         switch (self.*) {
             .ident => |exp| return exp.value,
             .int => |exp| return try exp.token.literal(allocator),
+            .boolean => |exp| return try exp.token.literal(allocator),
             .prefix => |exp| {
                 return try std.fmt.allocPrint(allocator, "({s}{s})", .{
                     exp.op,
@@ -173,6 +175,11 @@ pub const InfixExpression = struct {
     left: ?*Expression,
     op: []const u8,
     right: ?*Expression,
+};
+
+pub const Boolean = struct {
+    token: token.Token,
+    value: bool,
 };
 
 test "stringify statement" {
