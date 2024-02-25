@@ -10,6 +10,7 @@ const ParserError = error{
     InvalidStatementToken,
     UnexpectedToken,
     NoPrefixParseFunction,
+    UnmatchedParenthesis,
 };
 
 const Precedence = enum {
@@ -95,6 +96,7 @@ const Parser = struct {
         try parser.registerPrefix(token.TokenType.false, Parser.parseBoolean);
         try parser.registerPrefix(token.TokenType.bang, Parser.parsePrefixExpression);
         try parser.registerPrefix(token.TokenType.minus, Parser.parsePrefixExpression);
+        try parser.registerPrefix(token.TokenType.lparen, Parser.parseGroupedExpression);
 
         // Infix parse functions
         try parser.registerInfix(token.TokenType.plus, Parser.parseInfixExpression);
@@ -180,6 +182,9 @@ const Parser = struct {
             ParserError.NoPrefixParseFunction => return try std.fmt.allocPrint(allocator, "`{!}`. No prefix parse function for `{s}` found", .{
                 err, try self.cur_token.literal(allocator),
             }),
+            ParserError.UnmatchedParenthesis => return try std.fmt.allocPrint(allocator, "`{!}`. Unmatched parenthesis while parsing `{s}`", .{
+                err, try self.cur_token.literal(allocator),
+            }),
         }
     }
 
@@ -237,6 +242,21 @@ const Parser = struct {
         }
 
         return left_expr;
+    }
+
+    fn parseGroupedExpression(self: *Parser, allocator: Allocator) !ast.Expression {
+        self.trace("parseGroupedExpression");
+        defer self.untrace("parseGroupedExpression");
+
+        self.nextToken();
+
+        const exp = try self.parseExpression(Precedence.lowest, allocator);
+
+        if (!self.expectPeek(.rparen)) {
+            return ParserError.UnmatchedParenthesis;
+        }
+
+        return exp;
     }
 
     fn parseIdentifier(self: *Parser, allocator: Allocator) !ast.Expression {
@@ -325,7 +345,14 @@ const Parser = struct {
 
         self.nextToken();
 
-        rtn.statement.@"return".return_value = try self.parseExpression(Precedence.lowest, allocator);
+        rtn.statement.@"return".return_value = self.parseExpression(Precedence.lowest, allocator) catch |err| blk: {
+            // return statements can be independent of expressions
+            if (!self.curTokenIs(.semicolon)) {
+                return err;
+            } else {
+                break :blk null;
+            }
+        };
 
         if (self.peekTokenIs(.semicolon)) {
             self.nextToken();
@@ -456,9 +483,10 @@ test "return statements" {
 
     const lex = try lexer.Lexer.new(allocator, input);
     const par = try Parser.new(allocator, lex);
+    //par.trace_calls = .{ true, 0 };
     const prog = try par.parseProgram(allocator);
 
-    try t.expectEqual(4, prog.statements.items.len);
+    //std.debug.print("prog: {s}\n", .{try prog.string(allocator)});
 
     if (par.errors.items.len > 0) {
         par.printErrors();
@@ -466,11 +494,13 @@ test "return statements" {
 
     try t.expect(!par.checkErrors());
 
+    try t.expectEqual(4, prog.statements.items.len);
+
     const expected_strings: [4][]const u8 = .{
         "return x;",
-        "return y + (x + 5);",
-        "return;",
-        "return (x + y) - 5;",
+        "return ((y + x) + 5);",
+        "return ;",
+        "return ((x + y) - 5);",
     };
 
     for (expected_strings, prog.statements.items) |exp, stmt| {

@@ -32,17 +32,17 @@ pub const Statement = union(enum) {
                 return try std.fmt.allocPrint(allocator, "{s} {s} = {s};", .{
                     try stmt.token.literal(allocator),
                     stmt.name.value,
-                    if (stmt.value) |st| try st.string(allocator) else "null",
+                    if (stmt.value) |st| try st.string(allocator) else "",
                 });
             },
             .@"return" => |stmt| {
                 return try std.fmt.allocPrint(allocator, "{s} {s};", .{
                     try stmt.token.literal(allocator),
-                    if (stmt.return_value) |val| try val.string(allocator) else "null",
+                    if (stmt.return_value) |val| try val.string(allocator) else "",
                 });
             },
             .expression => |stmt| {
-                return if (stmt.expression) |exp| exp.string(allocator) else "null";
+                return if (stmt.expression) |exp| exp.string(allocator) else "";
             },
         }
     }
@@ -69,14 +69,14 @@ pub const Expression = union(enum) {
             .prefix => |exp| {
                 return try std.fmt.allocPrint(allocator, "({s}{s})", .{
                     exp.op,
-                    if (exp.right) |right| try right.string(allocator) else "null",
+                    if (exp.right) |right| try right.string(allocator) else "",
                 });
             },
             .infix => |exp| {
                 return try std.fmt.allocPrint(allocator, "({s} {s} {s})", .{
-                    if (exp.left) |left| try left.string(allocator) else "null",
+                    if (exp.left) |left| try left.string(allocator) else "",
                     exp.op,
-                    if (exp.right) |right| try right.string(allocator) else "null",
+                    if (exp.right) |right| try right.string(allocator) else "",
                 });
             },
         }
