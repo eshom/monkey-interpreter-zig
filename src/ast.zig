@@ -19,10 +19,11 @@ pub const Statement = union(enum) {
     let: LetStatement,
     @"return": ReturnStatement,
     expression: ExpressionStatement,
+    block: BlockStatement,
 
     pub fn tokenLiteral(self: *const Statement, allocator: Allocator) ![]const u8 {
         switch (self.*) {
-            .let, .@"return", .expression => |stm| return stm.token.literal(allocator),
+            .let, .@"return", .expression, .block => |stm| return stm.token.literal(allocator),
         }
     }
 
@@ -44,6 +45,9 @@ pub const Statement = union(enum) {
             .expression => |stmt| {
                 return if (stmt.expression) |exp| exp.string(allocator) else "";
             },
+            .block => |stmt| {
+                return try stmt.string(allocator);
+            },
         }
     }
 };
@@ -54,14 +58,15 @@ pub const Expression = union(enum) {
     prefix: PrefixExpression,
     infix: InfixExpression,
     boolean: Boolean,
+    @"if": IfExpression,
 
     pub fn tokenLiteral(self: *const Expression, allocator: Allocator) ![]const u8 {
         switch (self.*) {
-            .ident, .int, .prefix, .infix, .boolean => |exp| return try exp.token.literal(allocator),
+            .ident, .int, .prefix, .infix, .boolean, .@"if" => |exp| return try exp.token.literal(allocator),
         }
     }
 
-    pub fn string(self: *const Expression, allocator: Allocator) ![]const u8 {
+    pub fn string(self: *const Expression, allocator: Allocator) @typeInfo(@typeInfo(@TypeOf(Statement.string)).Fn.return_type.?).ErrorUnion.error_set![]const u8 {
         switch (self.*) {
             .ident => |exp| return exp.value,
             .int => |exp| return try exp.token.literal(allocator),
@@ -77,6 +82,13 @@ pub const Expression = union(enum) {
                     if (exp.left) |left| try left.string(allocator) else "",
                     exp.op,
                     if (exp.right) |right| try right.string(allocator) else "",
+                });
+            },
+            .@"if" => |exp| {
+                return try std.fmt.allocPrint(allocator, "if {s} {s} {s}", .{
+                    try exp.condition.string(allocator),
+                    try exp.consequence.string(allocator),
+                    if (exp.alternative) |alt| try std.mem.join(allocator, " ", &[_][]const u8{ "else", try alt.string(allocator) }) else "",
                 });
             },
         }
@@ -180,6 +192,33 @@ pub const InfixExpression = struct {
 pub const Boolean = struct {
     token: token.Token,
     value: bool,
+};
+
+pub const IfExpression = struct {
+    token: token.Token, // token.Token.if
+    condition: *Expression,
+    consequence: *BlockStatement,
+    alternative: ?*BlockStatement,
+};
+
+pub const BlockStatement = struct {
+    token: token.Token, // token.Token.lbrace
+    statements: ArrayListStmt,
+
+    pub fn new(allocator: Allocator) !*BlockStatement {
+        const block = try allocator.create(BlockStatement);
+        block.statements = ArrayListStmt.init(allocator);
+        block.token = .{ .illegal = "unititialized block statement" }; // should be set by the caller
+        return block;
+    }
+
+    pub fn string(self: *const BlockStatement, allocator: Allocator) @typeInfo(@typeInfo(@TypeOf(Statement.string)).Fn.return_type.?).ErrorUnion.error_set![]const u8 {
+        const strs = try allocator.alloc([]const u8, self.statements.items.len);
+        for (self.statements.items, strs) |st, *str| {
+            str.* = try st.string(allocator);
+        }
+        return try std.mem.join(allocator, "", strs);
+    }
 };
 
 test "stringify statement" {
