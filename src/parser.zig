@@ -666,6 +666,11 @@ test "operator precedence parsing" {
         \\5 < 4 != 3 > 4
         \\3 + 4 * 5 == 3 * 1 + 4 * 5
         \\3 + 4 * 5 == 3 * 1 + 4 * 5
+        \\
+        \\(3 + 4) * 5
+        \\(3 + (6 * 1)) / 8
+        \\1 * (-(5 + 5))
+        \\!(true == true)
     ;
 
     var prog_arena = std.heap.ArenaAllocator.init(t.allocator);
@@ -677,7 +682,7 @@ test "operator precedence parsing" {
     //par.trace_calls = .{ true, 0 };
     const prog = try par.parseProgram(allocator);
 
-    try t.expectEqual(14, prog.statements.items.len);
+    try t.expectEqual(18, prog.statements.items.len);
 
     if (par.errors.items.len > 0) {
         par.printErrors();
@@ -685,7 +690,7 @@ test "operator precedence parsing" {
 
     try t.expect(!par.checkErrors());
 
-    const expected_strings: [14][]const u8 = .{
+    const expected_strings: [18][]const u8 = .{
         "((-a) * b)",
         "(!(-a))",
         "((a + b) + c)",
@@ -700,6 +705,10 @@ test "operator precedence parsing" {
         "((5 < 4) != (3 > 4))",
         "((3 + (4 * 5)) == ((3 * 1) + (4 * 5)))",
         "((3 + (4 * 5)) == ((3 * 1) + (4 * 5)))",
+        "((3 + 4) * 5)",
+        "((3 + (6 * 1)) / 8)",
+        "(1 * (-(5 + 5)))",
+        "(!(true == true))",
     };
 
     for (expected_strings, prog.statements.items) |exp, stmt| {
