@@ -141,6 +141,9 @@ const Parser = struct {
     }
 
     pub fn parseProgram(self: *Parser, allocator: Allocator) !*ast.Program {
+        self.trace("parseProgram");
+        defer self.untrace("parseProgram");
+
         const prog = try ast.Program.new(allocator);
 
         while (self.cur_token != token.Token.eof) {
@@ -181,6 +184,9 @@ const Parser = struct {
     }
 
     fn parseStatement(self: *Parser, allocator: Allocator) !*ast.Node {
+        self.trace("parseStatement");
+        defer self.untrace("parseStatement");
+
         switch (self.cur_token) {
             .let => return try self.parseLetStatement(allocator),
             .@"return" => return try self.parseReturnStatement(allocator),
@@ -234,6 +240,9 @@ const Parser = struct {
     }
 
     fn parseIdentifier(self: *Parser, allocator: Allocator) !ast.Expression {
+        self.trace("parseIdentifier");
+        defer self.untrace("parseIdentifier");
+
         const out: ast.Expression = .{ .ident = .{
             .token = self.cur_token,
             .value = try self.cur_token.literal(allocator),
@@ -297,11 +306,17 @@ const Parser = struct {
     }
 
     fn parseBoolean(self: *Parser, allocator: Allocator) !ast.Expression {
+        self.trace("parseBoolean");
+        defer self.untrace("parseBoolean");
+
         _ = allocator;
         return .{ .boolean = .{ .token = self.cur_token, .value = self.curTokenIs(token.TokenType.true) } };
     }
 
     fn parseReturnStatement(self: *Parser, allocator: Allocator) !*ast.Node {
+        self.trace("parseReturnStatement");
+        defer self.untrace("parseReturnStatement");
+
         const rtn = try allocator.create(ast.Node);
         rtn.* = .{ .statement = .{ .@"return" = .{
             .token = self.cur_token,
@@ -310,8 +325,9 @@ const Parser = struct {
 
         self.nextToken();
 
-        //TODO: skipping expressions until semicolon for now
-        while (!self.curTokenIs(.semicolon)) {
+        rtn.statement.@"return".return_value = try self.parseExpression(Precedence.lowest, allocator);
+
+        if (self.peekTokenIs(.semicolon)) {
             self.nextToken();
         }
 
@@ -320,6 +336,9 @@ const Parser = struct {
 
     // program needs to cleanup a bunch of types allocated here
     fn parseLetStatement(self: *Parser, allocator: Allocator) !*ast.Node {
+        self.trace("parseLetStatement");
+        defer self.untrace("parseLetStatement");
+
         const tok_let = self.cur_token;
 
         if (!self.expectPeek(.ident)) {
@@ -344,8 +363,11 @@ const Parser = struct {
             return ParserError.UnexpectedToken;
         }
 
-        //TODO: skipping expressions until semicolon
-        while (!self.curTokenIs(.semicolon)) {
+        self.nextToken();
+
+        let.statement.let.value = try self.parseExpression(Precedence.lowest, allocator);
+
+        if (self.peekTokenIs(.semicolon)) {
             self.nextToken();
         }
 
@@ -400,30 +422,21 @@ test "let statements" {
 
     try t.expectEqual(3, prog.statements.items.len);
 
-    // for (prog.statements.items) |st| {
-    //     std.debug.print("statement token literal: {s}\n",.{try st.tokenLiteral(allocator)});
-    //     std.debug.print("ident token literal {s}\n", .{try st.let.name.token.literal(allocator)});
-    // }
-
-    var expected_identifiers: [3]ast.Identifier = .{
-        .{ .token = .{ .ident = "x" }, .value = "x" },
-        .{ .token = .{ .ident = "y" }, .value = "y" },
-        .{ .token = .{ .ident = "foobar" }, .value = "foobar" },
-    };
-
-    const expected_statements: [3]ast.Statement = .{
-        .{ .let = .{ .token = .{ .let = "let" }, .name = &expected_identifiers[0], .value = null } },
-        .{ .let = .{ .token = .{ .let = "let" }, .name = &expected_identifiers[1], .value = null } },
-        .{ .let = .{ .token = .{ .let = "let" }, .name = &expected_identifiers[2], .value = null } },
-    };
-
-    try t.expectEqualDeep(&expected_statements, prog.statements.items);
-
     if (par.errors.items.len > 0) {
-        std.debug.print("Caught parser errors:\n", .{});
-        for (par.errors.items) |msg| {
-            std.debug.print("{s}\n", .{msg});
-        }
+        par.printErrors();
+    }
+
+    try t.expect(!par.checkErrors());
+
+    const expected_strings: [3][]const u8 = .{
+        "let x = 5;",
+        "let y = 10;",
+        "let foobar = 838383;",
+    };
+
+    for (expected_strings, prog.statements.items) |exp, stmt| {
+        //std.debug.print("expected: {s}, found: {s}\n", .{ exp, try stmt.string(allocator) });
+        try t.expectEqualStrings(exp, try stmt.string(allocator));
     }
 }
 
@@ -447,25 +460,22 @@ test "return statements" {
 
     try t.expectEqual(4, prog.statements.items.len);
 
-    // for (prog.statements.items) |st| {
-    //     std.debug.print("statement token literal: {s}\n",.{try st.tokenLiteral(allocator)});
-    //     std.debug.print("ident token literal {s}\n", .{try st.let.name.token.literal(allocator)});
-    // }
+    if (par.errors.items.len > 0) {
+        par.printErrors();
+    }
 
-    const expected_statements: [4]ast.Statement = .{
-        .{ .@"return" = .{ .token = .{ .@"return" = "return" }, .return_value = null } },
-        .{ .@"return" = .{ .token = .{ .@"return" = "return" }, .return_value = null } },
-        .{ .@"return" = .{ .token = .{ .@"return" = "return" }, .return_value = null } },
-        .{ .@"return" = .{ .token = .{ .@"return" = "return" }, .return_value = null } },
+    try t.expect(!par.checkErrors());
+
+    const expected_strings: [4][]const u8 = .{
+        "return x;",
+        "return y + (x + 5);",
+        "return;",
+        "return (x + y) - 5;",
     };
 
-    try t.expectEqualDeep(&expected_statements, prog.statements.items);
-
-    if (par.errors.items.len > 0) {
-        std.debug.print("Caught parser errors:\n", .{});
-        for (par.errors.items) |msg| {
-            std.debug.print("{s}\n", .{msg});
-        }
+    for (expected_strings, prog.statements.items) |exp, stmt| {
+        //std.debug.print("expected: {s}, found: {s}\n", .{ exp, try stmt.string(allocator) });
+        try t.expectEqualStrings(exp, try stmt.string(allocator));
     }
 }
 
@@ -678,6 +688,8 @@ test "boolean parsing" {
         \\false;
         \\let foobar = true;
         \\let barfoo = false;
+        \\return true;
+        \\return false;
     ;
 
     var prog_arena = std.heap.ArenaAllocator.init(t.allocator);
@@ -686,9 +698,10 @@ test "boolean parsing" {
 
     const lex = try lexer.Lexer.new(allocator, input);
     const par = try Parser.new(allocator, lex);
+    //par.trace_calls = .{ true, 0 };
     const prog = try par.parseProgram(allocator);
 
-    try t.expectEqual(4, prog.statements.items.len);
+    try t.expectEqual(6, prog.statements.items.len);
 
     if (par.errors.items.len > 0) {
         par.printErrors();
@@ -696,15 +709,14 @@ test "boolean parsing" {
 
     try t.expect(!par.checkErrors());
 
-    const expected_strings: [4][]const u8 = .{
+    const expected_strings: [6][]const u8 = .{
         "true",
         "false",
-        "let foobar = true",
-        "let barfoo = false",
+        "let foobar = true;",
+        "let barfoo = false;",
+        "return true;",
+        "return false;",
     };
-
-    std.debug.print("statement 2: {any}", .{prog.statements.items[1]});
-    std.debug.print("statement 3: {any}", .{prog.statements.items[2]});
 
     for (expected_strings, prog.statements.items) |exp, stmt| {
         //std.debug.print("expected: {s}, found: {s}\n", .{ exp, try stmt.string(allocator) });
