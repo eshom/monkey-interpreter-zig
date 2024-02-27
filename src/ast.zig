@@ -85,10 +85,10 @@ pub const Expression = union(enum) {
                 });
             },
             .@"if" => |exp| {
-                return try std.fmt.allocPrint(allocator, "if {s} {s} {s}", .{
+                return try std.fmt.allocPrint(allocator, "if {s} {s}{s}", .{
                     try exp.condition.string(allocator),
                     try exp.consequence.string(allocator),
-                    if (exp.alternative) |alt| try std.mem.join(allocator, " ", &[_][]const u8{ "else", try alt.string(allocator) }) else "",
+                    if (exp.alternative) |alt| try std.mem.join(allocator, " ", &[_][]const u8{ " else", try alt.string(allocator) }) else "",
                 });
             },
         }
@@ -213,10 +213,21 @@ pub const BlockStatement = struct {
     }
 
     pub fn string(self: *const BlockStatement, allocator: Allocator) @typeInfo(@typeInfo(@TypeOf(Statement.string)).Fn.return_type.?).ErrorUnion.error_set![]const u8 {
-        const strs = try allocator.alloc([]const u8, self.statements.items.len);
-        for (self.statements.items, strs) |st, *str| {
-            str.* = try st.string(allocator);
+        const strs = try allocator.alloc([]const u8, self.statements.items.len * 2 + 2); // times 2 for semicolons + 2 for braces
+        errdefer allocator.free(strs);
+
+        strs[0] = "{ ";
+        var strs_idx: usize = 1;
+        var stmt_idx: usize = 0;
+        while (stmt_idx < self.statements.items.len) : ({
+            strs_idx += 2;
+            stmt_idx += 1;
+        }) {
+            strs[strs_idx] = try self.statements.items[stmt_idx].string(allocator);
+            strs[strs_idx + 1] = "; ";
         }
+        strs[strs.len - 1] = "}";
+
         return try std.mem.join(allocator, "", strs);
     }
 };

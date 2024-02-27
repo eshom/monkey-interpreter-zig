@@ -97,6 +97,7 @@ const Parser = struct {
         try parser.registerPrefix(token.TokenType.bang, Parser.parsePrefixExpression);
         try parser.registerPrefix(token.TokenType.minus, Parser.parsePrefixExpression);
         try parser.registerPrefix(token.TokenType.lparen, Parser.parseGroupedExpression);
+        try parser.registerPrefix(token.TokenType.@"if", Parser.parseIfExpression);
 
         // Infix parse functions
         try parser.registerInfix(token.TokenType.plus, Parser.parseInfixExpression);
@@ -399,6 +400,87 @@ const Parser = struct {
         }
 
         return let;
+    }
+
+    fn parseIfExpression(self: *Parser, allocator: Allocator) !ast.Expression {
+        self.trace("parseIfExpression");
+        defer self.untrace("parseIfExpression");
+
+        std.debug.assert(self.curTokenIs(.@"if"));
+        const tok_if = self.cur_token;
+
+        const cond = try allocator.create(ast.Expression);
+        errdefer allocator.destroy(cond);
+
+        if (!self.expectPeek(.lparen)) {
+            return ParserError.UnexpectedToken;
+        }
+
+        self.nextToken();
+
+        cond.* = try self.parseExpression(Precedence.lowest, allocator);
+
+        if (!self.expectPeek(.rparen)) {
+            return ParserError.UnexpectedToken;
+        }
+
+        if (!self.expectPeek(.lbrace)) {
+            return ParserError.UnexpectedToken;
+        }
+
+        std.debug.assert(self.curTokenIs(.lbrace));
+
+        const conseq = try self.parseBlockStatement(allocator);
+        errdefer allocator.destroy(conseq);
+        errdefer conseq.statements.deinit();
+
+        std.debug.assert(self.curTokenIs(.rbrace));
+
+        var exp: ast.Expression = .{ .@"if" = .{
+            .token = tok_if,
+            .condition = cond,
+            .consequence = conseq,
+            .alternative = null,
+        } };
+
+        if (self.peekTokenIs(.@"else")) {
+            self.nextToken();
+
+            if (!self.expectPeek(.lbrace)) {
+                return ParserError.UnexpectedToken;
+            }
+
+            const alt = try self.parseBlockStatement(allocator);
+            errdefer allocator.destroy(alt);
+            errdefer alt.statements.deinit();
+
+            std.debug.assert(self.curTokenIs(.rbrace));
+
+            exp.@"if".alternative = alt;
+        }
+
+        return exp;
+    }
+
+    fn parseBlockStatement(self: *Parser, allocator: Allocator) !*ast.BlockStatement {
+        self.trace("parseBlockStatement");
+        defer self.untrace("parseBlockStatement");
+
+        const block = try ast.BlockStatement.new(allocator);
+        errdefer allocator.destroy(block);
+        errdefer block.statements.deinit();
+
+        self.nextToken();
+
+        while (!self.curTokenIs(.rbrace) and !self.curTokenIs(.eof)) {
+            const stmt = try self.parseStatement(allocator);
+            try block.statements.append(stmt.statement);
+            self.nextToken();
+        }
+
+        std.debug.assert(self.curTokenIs(.rbrace));
+
+        return block;
     }
 
     fn curTokenIs(self: *Parser, tok: token.TokenType) bool {
@@ -755,6 +837,43 @@ test "boolean parsing" {
         "let barfoo = false;",
         "return true;",
         "return false;",
+    };
+
+    for (expected_strings, prog.statements.items) |exp, stmt| {
+        //std.debug.print("expected: {s}, found: {s}\n", .{ exp, try stmt.string(allocator) });
+        try t.expectEqualStrings(exp, try stmt.string(allocator));
+    }
+}
+
+test "if expressions" {
+    std.debug.print("\n", .{});
+
+    const input =
+        \\if (x < y) { x }
+        \\if (x < y) { x } else { y }
+        \\if (x == y) { x + y; x / y; } else { y; x; }
+    ;
+
+    var prog_arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer prog_arena.deinit();
+    const allocator = prog_arena.allocator();
+
+    const lex = try lexer.Lexer.new(allocator, input);
+    const par = try Parser.new(allocator, lex);
+    //par.trace_calls = .{ true, 0 };
+    const prog = try par.parseProgram(allocator);
+
+    if (par.errors.items.len > 0) {
+        par.printErrors();
+    }
+
+    try t.expect(!par.checkErrors());
+    try t.expectEqual(3, prog.statements.items.len);
+
+    const expected_strings: [3][]const u8 = .{
+        "if (x < y) { x; }",
+        "if (x < y) { x; } else { y; }",
+        "if (x == y) { (x + y); (x / y); } else { y; x; }",
     };
 
     for (expected_strings, prog.statements.items) |exp, stmt| {
