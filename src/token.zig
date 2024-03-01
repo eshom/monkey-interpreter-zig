@@ -55,6 +55,7 @@ pub const Token = union(enum) {
     pub fn literal(self: *const Token, allocator: Allocator) ![]u8 {
         var out: []u8 = undefined;
 
+        // std.debug.print("Trying Literal: {any}\n", .{self.*});
         switch (self.*) {
             .illegal, .eof, .ident, .assign, .plus, .minus, .bang, .asterix, .slash, .lt, .gt, .eq, .not_eq, .comma, .semicolon, .lparen, .rparen, .lbrace, .rbrace, .function, .let, .@"if", .@"else", .@"return" => |v| out = try std.fmt.allocPrint(allocator, "{s}", .{v}),
             .int => |v| out = try std.fmt.allocPrint(allocator, "{d}", .{v}),

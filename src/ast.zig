@@ -4,6 +4,8 @@ const token = @import("token.zig");
 //const lexer = @import("lexer.zig");
 //const parser = @import("parser.zig");
 const ArrayListStmt = std.ArrayList(Statement);
+const ArrayListIdent = std.ArrayList(Identifier);
+const ArrayListExpr = std.ArrayList(Expression);
 const Allocator = std.mem.Allocator;
 
 //          Node
@@ -59,10 +61,12 @@ pub const Expression = union(enum) {
     infix: InfixExpression,
     boolean: Boolean,
     @"if": IfExpression,
+    function: FunctionLiteral,
+    call: CallExpression,
 
     pub fn tokenLiteral(self: *const Expression, allocator: Allocator) ![]const u8 {
         switch (self.*) {
-            .ident, .int, .prefix, .infix, .boolean, .@"if" => |exp| return try exp.token.literal(allocator),
+            .ident, .int, .prefix, .infix, .boolean, .@"if", .function, .call => |exp| return try exp.token.literal(allocator),
         }
     }
 
@@ -89,6 +93,36 @@ pub const Expression = union(enum) {
                     try exp.condition.string(allocator),
                     try exp.consequence.string(allocator),
                     if (exp.alternative) |alt| try std.mem.join(allocator, " ", &[_][]const u8{ " else", try alt.string(allocator) }) else "",
+                });
+            },
+            .function => |exp| {
+                const params_str = try allocator.alloc([]const u8, exp.parameters.items.len);
+                errdefer allocator.free(params_str);
+
+                for (exp.parameters.items, params_str) |param, *str| {
+                    str.* = param.value;
+                }
+
+                const params_join = try std.mem.join(allocator, ", ", params_str);
+                errdefer allocator.free(params_join);
+
+                return try std.fmt.allocPrint(allocator, "{s}({s}) {s}", .{
+                    try exp.token.literal(allocator),
+                    params_join,
+                    try exp.body.string(allocator),
+                });
+            },
+            .call => |exp| {
+                const args_str = try allocator.alloc([]const u8, exp.arguments.items.len);
+                errdefer allocator.free(args_str);
+
+                for (exp.arguments.items, args_str) |arg, *str| {
+                    str.* = try arg.string(allocator);
+                }
+
+                return try std.fmt.allocPrint(allocator, "{s}({s})", .{
+                    if (exp.function) |func| try func.string(allocator) else "",
+                    try std.mem.join(allocator, ", ", args_str),
                 });
             },
         }
@@ -229,6 +263,48 @@ pub const BlockStatement = struct {
         strs[strs.len - 1] = "}";
 
         return try std.mem.join(allocator, "", strs);
+    }
+};
+
+pub const FunctionLiteral = struct {
+    token: token.Token, // token.Token.function
+    parameters: ArrayListIdent,
+    body: *BlockStatement,
+
+    pub fn new(allocator: Allocator) !*FunctionLiteral {
+        const fnlit = try allocator.create(FunctionLiteral);
+        errdefer allocator.destroy(fnlit);
+
+        fnlit.parameters = ArrayListIdent.init(allocator);
+        errdefer fnlit.parameters.deinit();
+
+        fnlit.body = try BlockStatement.new(allocator);
+        errdefer allocator.destroy(fnlit.body);
+        errdefer fnlit.body.deinit();
+
+        fnlit.token = .{ .illegal = "unititialized function literal" }; // should be set by the caller
+
+        return fnlit;
+    }
+};
+
+pub const CallExpression = struct {
+    token: token.Token, // token.Token.lparen
+    function: ?*Expression, // Identifier or FunctionLiteral
+    arguments: ArrayListExpr,
+
+    pub fn new(allocator: Allocator) !*CallExpression {
+        const call = try allocator.create(CallExpression);
+        errdefer allocator.destroy(call);
+
+        call.function = null;
+
+        call.arguments = ArrayListExpr.init(allocator);
+        errdefer call.arguments.deinit();
+
+        call.token = .{ .illegal = "unititialized call expression" }; // should be set by the caller
+
+        return call;
     }
 };
 

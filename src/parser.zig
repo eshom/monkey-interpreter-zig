@@ -5,6 +5,8 @@ const token = @import("token.zig");
 const Allocator = std.mem.Allocator;
 const t = std.testing;
 const ArrayListStrErr = std.ArrayList([]const u8);
+const ArrayListIdent = std.ArrayList(ast.Identifier);
+const ArrayListExpr = std.ArrayList(ast.Expression);
 
 const ParserError = error{
     InvalidStatementToken,
@@ -33,7 +35,7 @@ const Parser = struct {
     errors: ArrayListStrErr,
     trace_calls: struct { bool, usize } = .{ false, 0 }, // set to true to enable debug tracing
 
-    parse_fn_buff: [1024]u8,
+    parse_fn_buff: [1024 * 2]u8,
     parse_fn_allocator: Allocator,
 
     prefix_parse_fns: std.AutoHashMap(token.TokenType, PrefixParseFn),
@@ -46,14 +48,22 @@ const Parser = struct {
             for (0..self.trace_calls.@"1") |_| {
                 std.debug.print(" " ** 8, .{});
             }
-            self.trace_calls.@"1" += 1;
             std.debug.print("BEGIN {s}\n", .{msg});
+            for (0..self.trace_calls.@"1") |_| {
+                std.debug.print(" " ** 8, .{});
+            }
+            std.debug.print("BEGIN token: {s}\n", .{self.cur_token.tokenType()});
+            self.trace_calls.@"1" += 1;
         }
     }
 
     fn untrace(self: *Parser, msg: []const u8) void {
         if (self.trace_calls.@"0") {
             self.trace_calls.@"1" -= 1;
+            for (0..self.trace_calls.@"1") |_| {
+                std.debug.print(" " ** 8, .{});
+            }
+            std.debug.print("END token: {s}\n", .{self.cur_token.tokenType()});
             for (0..self.trace_calls.@"1") |_| {
                 std.debug.print(" " ** 8, .{});
             }
@@ -78,12 +88,8 @@ const Parser = struct {
         parser.nextToken();
 
         // Populate precedence table
-        const tokens = comptime [_]token.TokenType{
-            .eq, .not_eq, .lt, .gt, .plus, .minus, .slash, .asterix,
-        };
-        const precedences = comptime [_]Precedence{
-            .equals, .equals, .lessgreater, .lessgreater, .sum, .sum, .product, .product,
-        };
+        const tokens = comptime [_]token.TokenType{ .eq, .not_eq, .lt, .gt, .plus, .minus, .slash, .asterix, .lparen };
+        const precedences = comptime [_]Precedence{ .equals, .equals, .lessgreater, .lessgreater, .sum, .sum, .product, .product, .call };
 
         inline for (tokens, precedences) |tok_t, prec| {
             try parser.precedence_table.put(tok_t, prec);
@@ -98,6 +104,7 @@ const Parser = struct {
         try parser.registerPrefix(token.TokenType.minus, Parser.parsePrefixExpression);
         try parser.registerPrefix(token.TokenType.lparen, Parser.parseGroupedExpression);
         try parser.registerPrefix(token.TokenType.@"if", Parser.parseIfExpression);
+        try parser.registerPrefix(token.TokenType.function, Parser.parseFunctionLiteral);
 
         // Infix parse functions
         try parser.registerInfix(token.TokenType.plus, Parser.parseInfixExpression);
@@ -108,6 +115,7 @@ const Parser = struct {
         try parser.registerInfix(token.TokenType.not_eq, Parser.parseInfixExpression);
         try parser.registerInfix(token.TokenType.lt, Parser.parseInfixExpression);
         try parser.registerInfix(token.TokenType.gt, Parser.parseInfixExpression);
+        try parser.registerInfix(token.TokenType.lparen, Parser.parseCallExpression);
 
         return parser;
     }
@@ -151,7 +159,7 @@ const Parser = struct {
 
         while (self.cur_token != token.Token.eof) {
             const node = self.parseStatement(allocator) catch |err| switch (err) {
-                ParserError.NoPrefixParseFunction, ParserError.UnexpectedToken, ParserError.InvalidStatementToken => |e| {
+                ParserError.NoPrefixParseFunction, ParserError.UnexpectedToken, ParserError.InvalidStatementToken, ParserError.UnmatchedParenthesis => |e| {
                     try self.errors.append(try self.formatError(allocator, e));
                     self.nextToken();
                     continue;
@@ -232,17 +240,24 @@ const Parser = struct {
             return ParserError.NoPrefixParseFunction;
         }
 
+        var left_expr_prefix = left_expr;
+        var expr_infix = left_expr;
+
         while (self.peek_token != .semicolon and @intFromEnum(precedence) < @intFromEnum(self.peekPrecedence())) {
             const infix = self.infix_parse_fns.get(std.meta.activeTag(self.peek_token));
             if (infix) |func| {
                 self.nextToken();
-                left_expr = try func(self, allocator, &left_expr);
+                // if (std.meta.activeTag(left_expr) == .ident) std.debug.print("left_expr: {s}\n", .{left_expr.ident.value});
+                expr_infix = try func(self, allocator, &left_expr_prefix);
             } else {
-                return left_expr;
+                return left_expr_prefix;
             }
         }
 
-        return left_expr;
+        if (std.meta.activeTag(expr_infix) == .call) {
+            std.debug.print("Call function: {any}\n", .{expr_infix.call.function});
+        }
+        return expr_infix;
     }
 
     fn parseGroupedExpression(self: *Parser, allocator: Allocator) !ast.Expression {
@@ -276,6 +291,7 @@ const Parser = struct {
         self.trace("parseIntegerLiteral");
         defer self.untrace("parseIntegerLiteral");
 
+        std.debug.assert(self.cur_token == .int);
         _ = allocator;
         const lit: ast.Expression = .{ .int = .{ .token = self.cur_token, .value = self.cur_token.int } };
         return lit;
@@ -481,6 +497,117 @@ const Parser = struct {
         std.debug.assert(self.curTokenIs(.rbrace));
 
         return block;
+    }
+
+    fn parseFunctionLiteral(self: *Parser, allocator: Allocator) !ast.Expression {
+        self.trace("parseFunctionLiteral");
+        defer self.untrace("parseFunctionLiteral");
+
+        std.debug.assert(self.curTokenIs(.function));
+        const tok_fn = self.cur_token;
+
+        if (!self.expectPeek(.lparen)) {
+            return ParserError.UnexpectedToken;
+        }
+
+        const params = try self.parseFunctionParameters(allocator);
+        errdefer params.deinit();
+
+        std.debug.assert(self.curTokenIs(.rparen));
+
+        if (!self.expectPeek(.lbrace)) {
+            return ParserError.UnexpectedToken;
+        }
+
+        const body = try self.parseBlockStatement(allocator);
+        errdefer body.statements.deinit();
+
+        std.debug.assert(self.curTokenIs(.rbrace));
+
+        const exp: ast.Expression = .{ .function = .{
+            .token = tok_fn,
+            .parameters = params,
+            .body = body,
+        } };
+
+        return exp;
+    }
+
+    fn parseFunctionParameters(self: *Parser, allocator: Allocator) !ArrayListIdent {
+        self.trace("parseFunctionParameters");
+        defer self.untrace("parseFunctionParameters");
+
+        var params = ArrayListIdent.init(allocator);
+        errdefer params.deinit();
+
+        if (self.peekTokenIs(.rparen)) {
+            self.nextToken();
+            return params;
+        }
+
+        self.nextToken();
+        std.debug.assert(self.curTokenIs(.ident));
+
+        var ident = ast.Identifier{ .token = self.cur_token, .value = try self.cur_token.literal(allocator) };
+        try params.append(ident);
+
+        while (self.peekTokenIs(.comma)) {
+            self.nextToken();
+            std.debug.assert(self.curTokenIs(.comma));
+            self.nextToken();
+            std.debug.assert(self.curTokenIs(.ident));
+            ident = ast.Identifier{ .token = self.cur_token, .value = try self.cur_token.literal(allocator) };
+            try params.append(ident);
+        }
+
+        if (!self.expectPeek(.rparen)) {
+            return ParserError.UnexpectedToken;
+        }
+
+        return params;
+    }
+
+    fn parseCallExpression(self: *Parser, allocator: Allocator, function: *ast.Expression) !ast.Expression {
+        self.trace("parseCallExpression");
+        defer self.untrace("parseCallExpression");
+
+        std.debug.assert(self.curTokenIs(.lparen));
+        const tok = self.cur_token;
+
+        const args = try self.parseCallArguments(allocator);
+        errdefer args.deinit();
+
+        return .{ .call = .{
+            .token = tok,
+            .function = function,
+            .arguments = args,
+        } };
+    }
+
+    fn parseCallArguments(self: *Parser, allocator: Allocator) !ArrayListExpr {
+        var args = ArrayListExpr.init(allocator);
+        errdefer args.deinit();
+
+        if (self.peekTokenIs(.rparen)) {
+            self.nextToken();
+            return args;
+        }
+
+        self.nextToken();
+
+        try args.append(try self.parseExpression(Precedence.lowest, allocator));
+
+        while (self.peekTokenIs(.comma)) {
+            self.nextToken();
+            self.nextToken();
+            try args.append(try self.parseExpression(Precedence.lowest, allocator));
+        }
+
+        if (!self.expectPeek(.rparen)) {
+            return ParserError.UnexpectedToken;
+        }
+
+        return args;
     }
 
     fn curTokenIs(self: *Parser, tok: token.TokenType) bool {
@@ -874,6 +1001,81 @@ test "if expressions" {
         "if (x < y) { x; }",
         "if (x < y) { x; } else { y; }",
         "if (x == y) { (x + y); (x / y); } else { y; x; }",
+    };
+
+    for (expected_strings, prog.statements.items) |exp, stmt| {
+        //std.debug.print("expected: {s}, found: {s}\n", .{ exp, try stmt.string(allocator) });
+        try t.expectEqualStrings(exp, try stmt.string(allocator));
+    }
+}
+
+test "function literal" {
+    std.debug.print("\n", .{});
+
+    const input =
+        \\fn(x, y) { x + y; }
+        \\fn() {};
+        \\fn(x) {};
+        \\fn(x, y, z) {};
+    ;
+
+    var prog_arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer prog_arena.deinit();
+    const allocator = prog_arena.allocator();
+
+    const lex = try lexer.Lexer.new(allocator, input);
+    const par = try Parser.new(allocator, lex);
+    // par.trace_calls = .{ true, 0 };
+    const prog = try par.parseProgram(allocator);
+
+    if (par.errors.items.len > 0) {
+        par.printErrors();
+    }
+
+    try t.expect(!par.checkErrors());
+    try t.expectEqual(4, prog.statements.items.len);
+
+    const expected_strings: [4][]const u8 = .{
+        "fn(x, y) { (x + y); }",
+        "fn() { }",
+        "fn(x) { }",
+        "fn(x, y, z) { }",
+    };
+
+    for (expected_strings, prog.statements.items) |exp, stmt| {
+        //std.debug.print("expected: {s}, found: {s}\n", .{ exp, try stmt.string(allocator) });
+        try t.expectEqualStrings(exp, try stmt.string(allocator));
+    }
+}
+
+test "function call" {
+    std.debug.print("\n", .{});
+
+    const input =
+        \\add(1, 2 * 3, 4 + 5);
+    ;
+
+    var prog_arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer prog_arena.deinit();
+    const allocator = prog_arena.allocator();
+
+    const lex = try lexer.Lexer.new(allocator, input);
+    const par = try Parser.new(allocator, lex);
+    par.trace_calls = .{ true, 0 };
+    const prog = try par.parseProgram(allocator);
+
+    try t.expectEqual(1, prog.statements.items.len);
+
+    if (par.errors.items.len > 0) {
+        par.printErrors();
+    }
+
+    try t.expect(!par.checkErrors());
+
+    // try ast.Program.prettyPrint(try prog.string(allocator), std.io.getStdOut().writer());
+
+    const expected_strings: [1][]const u8 = .{
+        "add((1), (2 * 3), (4 + 5));",
     };
 
     for (expected_strings, prog.statements.items) |exp, stmt| {
