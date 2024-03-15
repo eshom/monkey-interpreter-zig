@@ -46,6 +46,10 @@ pub const Token = union(enum) {
             inline else => |value| try out.print("token: {s:<10} -> literal: {s}\n", .{ self.tokenName(), value }),
         }
     }
+
+    pub fn tag(self: *const Token) TokenTag {
+        return std.meta.activeTag(self.*);
+    }
 };
 
 pub const TokenTag = std.meta.Tag(Token);

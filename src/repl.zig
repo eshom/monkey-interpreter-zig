@@ -18,7 +18,7 @@ pub fn start(allocator: Allocator, in: Reader, out: Writer) !void {
             if (err == error.EndOfStream) return else return err;
         };
 
-        const lex = try lexer.Lexer.new(allocator, input.items);
+        const lex = try lexer.Lexer.init(allocator, input.items);
         defer allocator.destroy(lex);
 
         while (true) {

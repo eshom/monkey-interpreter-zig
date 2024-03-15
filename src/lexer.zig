@@ -8,12 +8,17 @@ pub const Lexer = struct {
     position: usize,
     read_pos: usize,
     ch: u8,
+    allocator: Allocator,
 
-    pub fn new(allocator: Allocator, input: []const u8) !*Lexer {
+    pub fn init(allocator: Allocator, input: []const u8) !*Lexer {
         const out = try allocator.create(Lexer);
-        out.* = .{ .input = input, .position = 0, .read_pos = 0, .ch = 0 };
+        out.* = .{ .input = input, .position = 0, .read_pos = 0, .ch = 0, .allocator = allocator };
         out.readChar();
         return out;
+    }
+
+    pub fn deinit(self: *Lexer) void {
+        self.allocator.destroy(self);
     }
 
     fn readChar(self: *Lexer) void {
@@ -153,8 +158,8 @@ test "next token" {
         .{ .eof = "EOF" },
     };
 
-    const lex = try Lexer.new(t.allocator, input);
-    defer t.allocator.destroy(lex);
+    const lex = try Lexer.init(t.allocator, input);
+    defer lex.deinit();
 
     for (expected) |ex| {
         const tok = lex.nextToken();
@@ -298,8 +303,8 @@ test "next token extended" {
         .{ .eof = "EOF" },
     };
 
-    const lex = try Lexer.new(t.allocator, input);
-    defer t.allocator.destroy(lex);
+    const lex = try Lexer.init(t.allocator, input);
+    defer lex.deinit();
 
     for (expected) |ex| {
         const tok = lex.nextToken();
