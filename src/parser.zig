@@ -53,7 +53,7 @@ pub const Parser = struct {
         self.peek_tok = self.lex.nextToken();
     }
 
-    // parser owns memory for the all ast, caller responsible to deinit
+    // parser owns memory for all ast, caller responsible to deinit
     pub fn parseProgram(self: *Parser) !*ast.Program {
         var prog = try ast.Program.init(self.allocator_arena);
         errdefer prog.deinit();
@@ -77,6 +77,7 @@ pub const Parser = struct {
     fn parseStatement(self: *Parser) !*ast.Statement {
         switch (self.cur_tok) {
             .let => return self.parseLetStatement(),
+            .@"return" => return self.parseReturnStatement(),
             else => {
                 const msg = try std.fmt.allocPrint(self.allocator, "{any}: token `{s}` is not handeled", .{ ParserError.UnhandeledToken, self.cur_tok.tokenName() });
                 self.errors.append(msg) catch |err| {
@@ -179,6 +180,41 @@ pub const Parser = struct {
 
         return ParserError.ParsingError;
     }
+
+    fn parseReturnStatement(self: *Parser) !*ast.Statement {
+        const stmt = try self.allocator_arena.create(ast.Statement);
+        errdefer self.allocator_arena.destroy(stmt);
+
+        const tok = self.cur_tok;
+
+        std.debug.assert(tok == .@"return");
+
+        self.nextToken();
+
+        // TODO: change to actual expression ParsingError
+        const exp = try self.allocator_arena.create(ast.Expression);
+        errdefer self.allocator_arena.destroy(exp);
+
+        exp.* = ast.Expression{
+            .ident = ast.Identifier{
+                .token = self.cur_tok,
+                .value = self.cur_tok.literal(),
+            },
+        };
+
+        stmt.* = ast.Statement{
+            .@"return" = .{
+                .token = tok,
+                .return_value = exp,
+            },
+        };
+
+        while (self.cur_tok != .semicolon) {
+            self.nextToken();
+        }
+
+        return stmt;
+    }
 };
 
 test "let statements" {
@@ -214,5 +250,34 @@ test "let statements" {
         try t.expectEqualStrings("let", stmt.literal());
         try t.expectEqualStrings("let", stmt.tag());
         try t.expectEqualStrings(expected, stmt.let.name.value);
+    }
+}
+
+test "return statements" {
+    std.debug.print("\n", .{});
+
+    const input =
+        \\return 5;
+        \\return 10;
+        \\return 993322;
+    ;
+
+    const lex = try lexer.Lexer.init(t.allocator, input);
+    defer lex.deinit();
+
+    const par = try Parser.init(t.allocator, lex);
+    defer par.deinit();
+
+    const prog = try par.parseProgram();
+    defer prog.deinit();
+
+    try par.checkParserErrors();
+
+    try t.expectEqual(3, prog.statements.items.len);
+
+    // TODO: add expression parsing and check for expression
+    for (prog.statements.items) |stmt| {
+        try t.expectEqualStrings("return", stmt.literal());
+        try t.expectEqualStrings("return", stmt.tag());
     }
 }

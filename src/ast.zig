@@ -4,6 +4,7 @@ const Allocator = std.mem.Allocator;
 
 pub const Statement = union(enum) {
     let: LetStatement,
+    @"return": ReturnStatement,
 
     pub fn literal(self: *const Statement) []const u8 {
         switch (self.*) {
@@ -75,6 +76,15 @@ pub const Identifier = struct {
     value: []const u8,
 
     pub fn literal(self: *const Identifier) []const u8 {
+        return self.token.literal();
+    }
+};
+
+pub const ReturnStatement = struct {
+    token: token.Token,
+    return_value: *Expression,
+
+    pub fn literal(self: *const ReturnStatement) []const u8 {
         return self.token.literal();
     }
 };
