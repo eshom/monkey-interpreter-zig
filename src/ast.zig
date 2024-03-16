@@ -47,9 +47,6 @@ pub const Program = struct {
     }
 
     pub fn deinit(self: *Program) void {
-        for (self.statements.items) |stmt| {
-            self.allocator.destroy(stmt);
-        }
         self.statements.deinit();
         self.allocator.destroy(self);
     }

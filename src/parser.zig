@@ -5,6 +5,8 @@ const lexer = @import("lexer.zig");
 const Allocator = std.mem.Allocator;
 const t = std.testing;
 
+const ParserError = error{ UnexpectedToken, UnhandeledToken, ParsingError };
+
 pub const Parser = struct {
     lex: *lexer.Lexer,
     cur_tok: token.Token,
@@ -12,6 +14,7 @@ pub const Parser = struct {
     allocator: Allocator,
     arena: std.heap.ArenaAllocator, // for expressions and sub-statements
     allocator_arena: Allocator, // Makes it easier due to recursive nature of the parser
+    errors: std.ArrayList([]const u8),
 
     pub fn init(allocator: Allocator, lex: *lexer.Lexer) !*Parser {
         var par = try allocator.create(Parser);
@@ -23,6 +26,7 @@ pub const Parser = struct {
             .lex = lex,
             .cur_tok = undefined,
             .peek_tok = undefined,
+            .errors = std.ArrayList([]const u8).init(allocator),
         };
 
         par.arena = std.heap.ArenaAllocator.init(allocator);
@@ -37,6 +41,10 @@ pub const Parser = struct {
 
     pub fn deinit(self: *Parser) void {
         self.arena.deinit();
+        for (self.errors.items) |err| {
+            self.allocator.free(err);
+        }
+        self.errors.deinit();
         self.allocator.destroy(self);
     }
 
@@ -45,18 +53,22 @@ pub const Parser = struct {
         self.peek_tok = self.lex.nextToken();
     }
 
-    // program owns memory for statements but caller must deinit program
+    // parser owns memory for the all ast, caller responsible to deinit
     pub fn parseProgram(self: *Parser) !*ast.Program {
-        // program and parser share the same underlying allocator
-        // however program owns all the top level statements, parser everything else
-        var prog = try ast.Program.init(self.allocator);
+        var prog = try ast.Program.init(self.allocator_arena);
         errdefer prog.deinit();
 
         while (self.cur_tok != .eof) {
-            const stmt = try self.parseStatement();
-            // program cleans up statements in case of error
+            defer self.nextToken();
+
+            const stmt = self.parseStatement() catch |err| switch (err) {
+                ParserError.UnexpectedToken, ParserError.UnhandeledToken => {
+                    // parser errors are recorded in Parser.errors as they happen
+                    continue;
+                },
+                else => return err, // unexpected errors (e.g. OutOfMemory)
+            };
             try prog.statements.append(stmt);
-            self.nextToken();
         }
 
         return prog;
@@ -65,22 +77,27 @@ pub const Parser = struct {
     fn parseStatement(self: *Parser) !*ast.Statement {
         switch (self.cur_tok) {
             .let => return self.parseLetStatement(),
-            else => return error.UnhandeledToken,
+            else => {
+                const msg = try std.fmt.allocPrint(self.allocator, "{any}: token `{s}` is not handeled", .{ ParserError.UnhandeledToken, self.cur_tok.tokenName() });
+                self.errors.append(msg) catch |err| {
+                    self.allocator.free(msg);
+                    return err;
+                };
+                return ParserError.UnhandeledToken;
+            },
         }
     }
 
     fn parseLetStatement(self: *Parser) !*ast.Statement {
-        // statements handled by program, not the parser
-        // maybe it was not the smartest choice
-        const stmt = try self.allocator.create(ast.Statement);
-        errdefer self.allocator.destroy(stmt);
+        const stmt = try self.allocator_arena.create(ast.Statement);
+        errdefer self.allocator_arena.destroy(stmt);
 
         const tok = self.cur_tok;
 
         std.debug.assert(tok == .let);
 
         if (!self.expectPeek(.ident)) {
-            return error.UnexpectedToken;
+            return self.peekError("ident");
         }
 
         const ident = try self.allocator_arena.create(ast.Identifier);
@@ -91,7 +108,7 @@ pub const Parser = struct {
         };
 
         if (!self.expectPeek(.assign)) {
-            return error.UnexpectedToken;
+            return self.peekError("assign");
         }
 
         // TODO: change to actual expression parsing
@@ -137,6 +154,31 @@ pub const Parser = struct {
             return false;
         }
     }
+
+    fn peekError(self: *Parser, tok_name: []const u8) anyerror {
+        const msg = try std.fmt.allocPrint(self.allocator, "{any}: expected next token to be `{s}`, got `{s}` instead", .{ ParserError.UnexpectedToken, tok_name, self.peek_tok.tokenName() });
+        self.errors.append(msg) catch |err| {
+            self.allocator.free(msg);
+            return err;
+        };
+        return ParserError.UnexpectedToken;
+    }
+
+    fn checkParserErrors(self: *Parser) !void {
+        if (self.errors.items.len == 0) {
+            return;
+        }
+
+        const stderr = std.io.getStdErr();
+        var writer = stderr.writer();
+
+        try writer.print("parser has {d} errors\n", .{self.errors.items.len});
+        for (self.errors.items) |err| {
+            try writer.print("{s}\n", .{err});
+        }
+
+        return ParserError.ParsingError;
+    }
 };
 
 test "let statements" {
@@ -146,6 +188,7 @@ test "let statements" {
         \\let x = 5;
         \\let y = 10;
         \\let foobar = 838383;
+        \\let 5;
     ;
 
     const lex = try lexer.Lexer.init(t.allocator, input);
@@ -156,6 +199,10 @@ test "let statements" {
 
     const prog = try par.parseProgram();
     defer prog.deinit();
+
+    const parse_err = par.checkParserErrors();
+    try t.expectError(ParserError.ParsingError, parse_err);
+    try t.expectStringStartsWith(par.errors.items[0], "error.UnexpectedToken");
 
     try t.expectEqual(3, prog.statements.items.len);
 
